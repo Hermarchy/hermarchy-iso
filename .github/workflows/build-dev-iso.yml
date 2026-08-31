@@ -1,0 +1,25 @@
+name: Build and publish development ISO
+
+# GitHub only registers workflow_dispatch files from the default branch.
+# The complete workflow is on dev and is loaded when dispatched with ref=dev.
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: Why this dev ISO is being requested
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  wrong-ref:
+    name: Refuse builds from the default-branch registration stub
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain required ref
+        run: |
+          echo 'This file only registers the manual workflow with GitHub.' >&2
+          echo 'Dispatch build-dev-iso.yml with ref=dev.' >&2
+          exit 1
