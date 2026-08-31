@@ -1,0 +1,82 @@
+#!/bin/bash
+
+set -euo pipefail
+
+ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+PROFILE="$ROOT/profile"
+RELEASE="$ROOT/release"
+WORK="$ROOT/.work"
+STAGED_PROFILE="$WORK/profile"
+
+usage() {
+  printf 'Usage: %s [--clean]\n' "$0"
+}
+
+clean=0
+while (( $# > 0 )); do
+  case $1 in
+    --clean) clean=1 ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; exit 2 ;;
+  esac
+  shift
+done
+
+command -v docker >/dev/null || { echo 'docker is required' >&2; exit 1; }
+[[ -z $(git -C "$ROOT" status --porcelain --untracked-files=normal) ]] || {
+  echo 'refusing to build from an uncommitted checkout' >&2
+  exit 1
+}
+
+commit=$(git -C "$ROOT" rev-parse HEAD)
+short_commit=$(git -C "$ROOT" rev-parse --short=12 HEAD)
+built_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+source_epoch=$(git -C "$ROOT" show -s --format=%ct HEAD)
+
+if (( clean )); then
+  rm -rf "$WORK" "$RELEASE"
+fi
+rm -rf "$STAGED_PROFILE"
+mkdir -p "$STAGED_PROFILE" "$RELEASE" "$WORK/mkarchiso"
+cp -a "$PROFILE/." "$STAGED_PROFILE/"
+cat >"$STAGED_PROFILE/airootfs/etc/hermarchy-build" <<EOF
+channel=dev
+architecture=x86_64
+iso_commit=$commit
+built_at=$built_at
+EOF
+
+container=(docker)
+if ! docker info >/dev/null 2>&1; then
+  container=(sudo docker)
+fi
+
+# HOST_UID/HOST_GID expand inside the container shell, not in this shell.
+# shellcheck disable=SC2016
+"${container[@]}" run --rm --privileged \
+  -e SOURCE_DATE_EPOCH="$source_epoch" \
+  -e HOST_UID="$(id -u)" \
+  -e HOST_GID="$(id -g)" \
+  -v "$STAGED_PROFILE:/profile:ro" \
+  -v "$WORK/mkarchiso:/work" \
+  -v "$RELEASE:/out" \
+  archlinux:latest \
+  bash -euo pipefail -c '
+    pacman -Syu --noconfirm archiso
+    rm -rf /work/*
+    mkarchiso -v -r -w /work -o /out /profile
+    chown -R "$HOST_UID:$HOST_GID" /out /work
+  '
+
+mapfile -t images < <(printf '%s\n' "$RELEASE"/*.iso)
+(( ${#images[@]} == 1 )) || { echo "expected one ISO, found ${#images[@]}" >&2; exit 1; }
+final="$RELEASE/hermarchy-dev-${short_commit}-x86_64.iso"
+if [[ ${images[0]} != "$final" ]]; then
+  mv -f "${images[0]}" "$final"
+fi
+
+if [[ -n ${SUDO_UID:-} && -n ${SUDO_GID:-} ]]; then
+  chown -R "$SUDO_UID:$SUDO_GID" "$RELEASE" "$WORK"
+fi
+
+printf 'Built %s\n' "$final"

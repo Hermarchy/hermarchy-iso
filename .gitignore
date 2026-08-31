@@ -1,0 +1,6 @@
+.work/
+release/
+.publish/
+test-runs/
+*.qcow2
+*.fd

@@ -1,0 +1,8 @@
+ArchISO releng profile source
+
+Repository: https://gitlab.archlinux.org/archlinux/archiso.git
+Commit: f900196af8f293ec7e4ef452b368b9db8012d79f
+Profile: configs/releng
+Imported: 2026-08-31
+
+The committed profile is intentionally vendored so dev ISO inputs are reviewable and do not drift with the build host's installed archiso package. Refresh it deliberately and reapply Hermarchy-specific profile changes.

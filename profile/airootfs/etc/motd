@@ -1,0 +1,10 @@
+Hermarchy development installation environment
+
+The custom installer starts automatically on tty1. If it exits, run:
+  hermarchy-installer
+
+Installation logs are stored at:
+  /var/log/hermarchy-install.log
+
+For Wi-Fi, connect with iwctl before restarting the installer.
+This installer is destructive and supports only whole-disk UEFI installation.

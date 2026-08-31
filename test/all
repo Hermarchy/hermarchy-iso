@@ -1,0 +1,32 @@
+#!/bin/bash
+
+set -euo pipefail
+
+ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+status=0
+
+run() {
+  local name=$1
+  shift
+  printf '==> %s\n' "$name"
+  if "$@"; then
+    printf 'ok - %s\n' "$name"
+  else
+    printf 'not ok - %s\n' "$name" >&2
+    status=1
+  fi
+}
+
+run 'shell syntax' "$ROOT/test/syntax-test.sh"
+run 'installer helpers' "$ROOT/test/installer-test.sh"
+run 'ArchISO profile' "$ROOT/test/profile-test.sh"
+run 'R2 replacement transaction' "$ROOT/test/publish-test.sh"
+run 'manual-only workflow' "$ROOT/test/workflow-test.sh"
+
+if command -v shellcheck >/dev/null; then
+  run 'shellcheck' "$ROOT/test/shellcheck-test.sh"
+else
+  printf 'ok - shellcheck unavailable; skipped locally (required in CI)\n'
+fi
+
+exit "$status"

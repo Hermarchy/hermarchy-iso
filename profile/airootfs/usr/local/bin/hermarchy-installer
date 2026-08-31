@@ -1,0 +1,126 @@
+#!/bin/bash
+
+set -euo pipefail
+
+readonly LIB_DIR=/usr/local/lib/hermarchy-installer
+# shellcheck source=profile/airootfs/usr/local/lib/hermarchy-installer/common.sh
+source "$LIB_DIR/common.sh"
+
+DIALOG=(dialog --clear --no-collapse)
+
+message() {
+  "${DIALOG[@]}" --title "Hermarchy Installer" --msgbox "$1" 12 72
+}
+
+input_value() {
+  local prompt=$1 initial=${2:-} value
+  value=$("${DIALOG[@]}" --stdout --title "Hermarchy Installer" --inputbox "$prompt" 10 72 "$initial") || return 1
+  printf '%s\n' "$value"
+}
+
+password_value() {
+  local prompt=$1 value
+  value=$("${DIALOG[@]}" --stdout --insecure --title "Hermarchy Installer" --passwordbox "$prompt" 10 72) || return 1
+  printf '%s' "$value"
+}
+
+choose_disk() {
+  local path description
+  local -a choices=()
+  while IFS=$'\t' read -r path description; do
+    [[ -n $path ]] && choices+=("$path" "$description")
+  done < <(list_install_disks)
+
+  (( ${#choices[@]} > 0 )) || {
+    message "No eligible installation disks were found.\n\nHermarchy excludes removable, read-only, mounted, live-media, and sub-8-GiB disks."
+    return 1
+  }
+
+  "${DIALOG[@]}" --stdout --title "Select installation disk" \
+    --menu "The selected disk will be completely erased." 18 78 10 \
+    "${choices[@]}"
+}
+
+main() {
+  local disk hostname username password confirm_password confirmation status
+
+  [[ $EUID == 0 ]] || fail "installer must run as root"
+  [[ $(tty) == /dev/tty1 ]] || fail "installer must run on tty1"
+
+  message "Welcome to the experimental Hermarchy development installer.\n\nThis version supports only x86_64 UEFI systems and erases an entire disk. It does not support encryption, dual boot, or partition preservation."
+
+  [[ -d /sys/firmware/efi ]] || {
+    message "This machine was not booted in UEFI mode. Hermarchy cannot install here yet."
+    return 1
+  }
+
+  if ! curl --fail --silent --show-error --head --connect-timeout 10 https://geo.mirror.pkgbuild.com/ >/dev/null; then
+    message "No working network connection was detected. Connect to the network and run hermarchy-installer again."
+    return 1
+  fi
+
+  disk=$(choose_disk) || return 1
+  validate_install_disk "$disk"
+
+  while :; do
+    hostname=$(input_value "Hostname:" "hermarchy") || return 1
+    validate_hostname "$hostname" && break
+    message "Hostname must be 1-63 letters, digits, or hyphens, and cannot begin or end with a hyphen."
+  done
+
+  while :; do
+    username=$(input_value "Username:" "hermarchy") || return 1
+    validate_username "$username" && break
+    message "Username must start with a lowercase letter or underscore, contain only lowercase letters, digits, underscores, or hyphens, and cannot be root or nobody."
+  done
+
+  while :; do
+    password=$(password_value "Password for $username:") || return 1
+    confirm_password=$(password_value "Confirm password:") || return 1
+    if [[ -n $password && $password == "$confirm_password" && $password != *:* && $password != *$'\n'* ]]; then
+      break
+    fi
+    unset password confirm_password
+    message "Passwords were empty, did not match, or contained an unsupported colon or newline."
+  done
+  unset confirm_password
+
+  confirmation=$(input_value "FINAL WARNING\n\nAll data on $disk will be destroyed.\n\nType the exact disk path to continue:") || return 1
+  if [[ $confirmation != "$disk" ]]; then
+    unset password
+    message "Confirmation did not match. No disks were changed."
+    return 1
+  fi
+
+  if ! "${DIALOG[@]}" --title "Confirm installation" --yesno \
+    "Install Hermarchy with these settings?\n\nDisk: $disk\nHostname: $hostname\nUser: $username\nFilesystem: ext4\nBootloader: systemd-boot\nTimezone: UTC" 18 72; then
+    unset password
+    return 0
+  fi
+
+  clear
+  printf 'Starting Hermarchy installation. Log: /var/log/hermarchy-install.log\n\n'
+  exec 3< <(printf '%s\0' "$password")
+  unset password
+  set +e
+  /usr/local/bin/hermarchy-install \
+    --disk "$disk" \
+    --hostname "$hostname" \
+    --username "$username" \
+    --password-fd 3
+  status=$?
+  set -e
+  exec 3<&-
+
+  if (( status == 0 )); then
+    if "${DIALOG[@]}" --title "Installation complete" --yesno \
+      "Hermarchy was installed successfully. Remove the installation media when the machine restarts.\n\nReboot now?" 12 72; then
+      systemctl reboot
+    fi
+  else
+    message "Installation failed.\n\nThe previous system was not automatically restored. Review /var/log/hermarchy-install.log from the live shell."
+    return "$status"
+  fi
+}
+
+main "$@"

@@ -1,0 +1,157 @@
+name: Build and publish development ISO
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: Why this dev ISO is being requested
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hermarchy-dev-iso
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    name: Build, verify, and replace current dev ISO
+    runs-on: ubuntu-latest
+    environment: dev-iso
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out dev source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Confirm requested branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == "refs/heads/dev" ]] || {
+            echo "This workflow may only build the dev branch." >&2
+            exit 1
+          }
+
+      - name: Install validation and publishing tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes jq rclone shellcheck
+
+      - name: Run tests
+        run: ./test/all
+
+      - name: Build ISO
+        run: ./bin/build-iso --clean
+
+      - name: Prepare publish set
+        id: publish-set
+        shell: bash
+        env:
+          PUBLIC_BASE_URL: ${{ vars.DEV_ISO_PUBLIC_BASE_URL }}
+          REQUEST_REASON: ${{ inputs.reason }}
+        run: |
+          set -euo pipefail
+          mapfile -t images < <(compgen -G 'release/*.iso')
+          (( ${#images[@]} == 1 )) || {
+            echo "Expected exactly one ISO, found ${#images[@]}" >&2
+            exit 1
+          }
+
+          mkdir -p .publish
+          cp "${images[0]}" .publish/hermarchy-dev-x86_64.iso
+          (
+            cd .publish
+            sha256sum hermarchy-dev-x86_64.iso > hermarchy-dev-x86_64.iso.sha256
+          )
+          checksum=$(cut -d' ' -f1 .publish/hermarchy-dev-x86_64.iso.sha256)
+          size=$(stat -c %s .publish/hermarchy-dev-x86_64.iso)
+          built_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          jq -n \
+            --arg channel dev \
+            --arg architecture x86_64 \
+            --arg iso_commit "$GITHUB_SHA" \
+            --arg built_at "$built_at" \
+            --arg filename hermarchy-dev-x86_64.iso \
+            --arg sha256 "$checksum" \
+            --arg github_run_id "$GITHUB_RUN_ID" \
+            --arg reason "$REQUEST_REASON" \
+            --arg url "${PUBLIC_BASE_URL%/}/dev/hermarchy-dev-x86_64.iso" \
+            --argjson size "$size" \
+            '{channel,architecture,iso_commit,built_at,filename,size,sha256,github_run_id,reason,url}' \
+            > .publish/build.json
+
+          echo "sha256=$checksum" >> "$GITHUB_OUTPUT"
+          echo "size=$size" >> "$GITHUB_OUTPUT"
+          echo "url=${PUBLIC_BASE_URL%/}/dev/hermarchy-dev-x86_64.iso" >> "$GITHUB_OUTPUT"
+
+      - name: Stage, verify, and replace R2 dev ISO
+        shell: bash
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+        run: |
+          ./bin/publish-dev-iso \
+            .publish/hermarchy-dev-x86_64.iso \
+            .publish/hermarchy-dev-x86_64.iso.sha256 \
+            .publish/build.json
+
+      - name: Verify public download set
+        shell: bash
+        env:
+          ISO_URL: ${{ steps.publish-set.outputs.url }}
+          EXPECTED_SIZE: ${{ steps.publish-set.outputs.size }}
+          EXPECTED_SHA256: ${{ steps.publish-set.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          curl_args=(--fail --silent --show-error --location --retry 5 --retry-all-errors)
+          actual_size=$(curl "${curl_args[@]}" --head "$ISO_URL" |
+            tr -d '\r' |
+            perl -ne 'if (/^content-length:\s*(\d+)/i) { $n=$1 } END { print $n // "" }')
+          [[ $actual_size == "$EXPECTED_SIZE" ]] || {
+            echo "Public object size mismatch: actual=$actual_size expected=$EXPECTED_SIZE" >&2
+            exit 1
+          }
+
+          base_url=${ISO_URL%/*}
+          actual_sha256=$(curl "${curl_args[@]}" "$ISO_URL.sha256" | cut -d' ' -f1)
+          [[ $actual_sha256 == "$EXPECTED_SHA256" ]] || {
+            echo "Public checksum mismatch: actual=$actual_sha256 expected=$EXPECTED_SHA256" >&2
+            exit 1
+          }
+
+          manifest=$(curl "${curl_args[@]}" "$base_url/build.json")
+          jq -e \
+            --arg commit "$GITHUB_SHA" \
+            --arg sha256 "$EXPECTED_SHA256" \
+            --argjson size "$EXPECTED_SIZE" \
+            '.channel == "dev" and
+             .architecture == "x86_64" and
+             .iso_commit == $commit and
+             .sha256 == $sha256 and
+             .size == $size' <<<"$manifest" >/dev/null
+
+      - name: Publish run summary
+        shell: bash
+        env:
+          ISO_URL: ${{ steps.publish-set.outputs.url }}
+          ISO_SHA256: ${{ steps.publish-set.outputs.sha256 }}
+          ISO_SIZE: ${{ steps.publish-set.outputs.size }}
+        run: |
+          {
+            echo '## Hermarchy development ISO'
+            echo
+            echo "- Commit: \`$GITHUB_SHA\`"
+            echo "- Size: \`$ISO_SIZE bytes\`"
+            echo "- SHA-256: \`$ISO_SHA256\`"
+            echo "- Download: $ISO_URL"
+          } >> "$GITHUB_STEP_SUMMARY"

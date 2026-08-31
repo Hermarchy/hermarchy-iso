@@ -1,0 +1,115 @@
+#!/bin/bash
+
+set -euo pipefail
+
+usage() {
+  printf 'Usage: %s ISO SHA256_FILE BUILD_JSON\n' "$0" >&2
+}
+
+(( $# == 3 )) || { usage; exit 2; }
+iso=$1
+checksum=$2
+manifest=$3
+for file in "$iso" "$checksum" "$manifest"; do
+  [[ -f $file ]] || { echo "missing publish input: $file" >&2; exit 1; }
+done
+
+for variable in R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_ENDPOINT R2_BUCKET; do
+  [[ -n ${!variable:-} ]] || { echo "required environment variable is unset: $variable" >&2; exit 1; }
+done
+command -v jq >/dev/null || { echo 'jq is required' >&2; exit 1; }
+command -v rclone >/dev/null || { echo 'rclone is required' >&2; exit 1; }
+
+export RCLONE_CONFIG_R2_TYPE=s3
+export RCLONE_CONFIG_R2_PROVIDER=Cloudflare
+export RCLONE_CONFIG_R2_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
+export RCLONE_CONFIG_R2_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
+export RCLONE_CONFIG_R2_ENDPOINT="$R2_ENDPOINT"
+export RCLONE_CONFIG_R2_REGION=auto
+export RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true
+
+run_id=${GITHUB_RUN_ID:-local}
+attempt=${GITHUB_RUN_ATTEMPT:-1}
+transaction="_transactions/${run_id}-${attempt}"
+staging="r2:${R2_BUCKET}/${transaction}/staging"
+rollback="r2:${R2_BUCKET}/${transaction}/rollback"
+current="r2:${R2_BUCKET}/dev"
+rollback_ready=0
+promotion_started=0
+publish_succeeded=0
+
+iso_name=hermarchy-dev-x86_64.iso
+checksum_name=hermarchy-dev-x86_64.iso.sha256
+manifest_name=build.json
+
+remote_exists() {
+  rclone size "$1" --json 2>/dev/null | jq -e '.count == 1' >/dev/null
+}
+
+verify_size() {
+  local local_file=$1 remote_file=$2 expected actual count
+  expected=$(stat -c %s "$local_file")
+  read -r count actual < <(rclone size "$remote_file" --json | jq -r '[.count,.bytes] | @tsv')
+  [[ $count == 1 && $actual == "$expected" ]] || {
+    echo "remote verification failed for $remote_file: count=$count bytes=$actual expected=$expected" >&2
+    return 1
+  }
+}
+
+remove_current_set() {
+  rclone deletefile "$current/$iso_name" 2>/dev/null || true
+  rclone deletefile "$current/$checksum_name" 2>/dev/null || true
+  rclone deletefile "$current/$manifest_name" 2>/dev/null || true
+}
+
+restore_previous() {
+  (( rollback_ready )) || {
+    remove_current_set
+    return 0
+  }
+  echo 'Restoring the previous dev ISO set after failed promotion' >&2
+  rclone copyto "$rollback/$iso_name" "$current/$iso_name"
+  rclone copyto "$rollback/$checksum_name" "$current/$checksum_name"
+  rclone copyto "$rollback/$manifest_name" "$current/$manifest_name"
+}
+
+cleanup() {
+  local status=$?
+  set +e
+  if (( status != 0 && promotion_started && ! publish_succeeded )); then
+    restore_previous || echo 'WARNING: automatic rollback failed; inspect the R2 dev prefix' >&2
+  fi
+  rclone purge "r2:${R2_BUCKET}/${transaction}" >/dev/null 2>&1 || true
+  return "$status"
+}
+trap cleanup EXIT
+
+# Upload the complete candidate before touching the current set.
+rclone copyto "$iso" "$staging/$iso_name"
+rclone copyto "$checksum" "$staging/$checksum_name"
+rclone copyto "$manifest" "$staging/$manifest_name"
+verify_size "$iso" "$staging/$iso_name"
+verify_size "$checksum" "$staging/$checksum_name"
+verify_size "$manifest" "$staging/$manifest_name"
+
+# A current set is valid only when all three objects exist. Preserve it for rollback.
+if remote_exists "$current/$iso_name" &&
+   remote_exists "$current/$checksum_name" &&
+   remote_exists "$current/$manifest_name"; then
+  rclone copyto "$current/$iso_name" "$rollback/$iso_name"
+  rclone copyto "$current/$checksum_name" "$rollback/$checksum_name"
+  rclone copyto "$current/$manifest_name" "$rollback/$manifest_name"
+  rollback_ready=1
+fi
+
+promotion_started=1
+# Manifest is the commit marker and is promoted last.
+rclone copyto "$staging/$iso_name" "$current/$iso_name"
+rclone copyto "$staging/$checksum_name" "$current/$checksum_name"
+rclone copyto "$staging/$manifest_name" "$current/$manifest_name"
+verify_size "$iso" "$current/$iso_name"
+verify_size "$checksum" "$current/$checksum_name"
+verify_size "$manifest" "$current/$manifest_name"
+publish_succeeded=1
+
+printf 'Published current dev ISO set to r2:%s/dev/\n' "$R2_BUCKET"
