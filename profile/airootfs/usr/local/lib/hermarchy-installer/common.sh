@@ -28,6 +28,26 @@ validate_username() {
   esac
 }
 
+validate_uefi_environment() {
+  local platform_size efivar_options secure_boot_var secure_boot
+
+  [[ $(uname -m) == x86_64 ]] || fail "Hermarchy currently supports x86_64 only"
+  [[ -r /sys/firmware/efi/fw_platform_size ]] || fail "UEFI firmware information is unavailable"
+  platform_size=$(</sys/firmware/efi/fw_platform_size)
+  [[ $platform_size == 64 ]] || fail "Hermarchy requires 64-bit UEFI firmware"
+  [[ -d /sys/firmware/efi/efivars ]] || fail "UEFI variables are unavailable"
+  [[ $(findmnt -nro FSTYPE /sys/firmware/efi/efivars 2>/dev/null || true) == efivarfs ]] ||
+    fail "UEFI variables are not mounted as efivarfs"
+  efivar_options=$(findmnt -nro OPTIONS /sys/firmware/efi/efivars 2>/dev/null || true)
+  [[ ,$efivar_options, != *,ro,* ]] || fail "UEFI variables are mounted read-only"
+
+  secure_boot_var=$(compgen -G '/sys/firmware/efi/efivars/SecureBoot-*' | head -n 1 || true)
+  if [[ -n $secure_boot_var ]]; then
+    secure_boot=$(od -An -t u1 -j 4 -N 1 "$secure_boot_var" | tr -d '[:space:]')
+    [[ $secure_boot != 1 ]] || fail "Secure Boot is enabled but Hermarchy is not signed yet"
+  fi
+}
+
 find_live_disk() {
   local source type parent
   source=$(findmnt -n -o SOURCE /run/archiso/bootmnt 2>/dev/null || true)
@@ -60,10 +80,13 @@ eligible_disks_from_json() {
       | select(
           ([.. | objects | .mountpoints? // empty | .[]? | select(. != null and . != "")] | length) == 0
         )
+      | select(([.. | objects | .type? // empty] | all(. == "disk" or . == "part")))
       | [
           .path,
           (((.size / 1073741824) * 10 | floor) / 10 | tostring) + " GiB" +
-          (if ((.model // "") | length) > 0 then "  " + (.model | gsub("[[:space:]]+"; " ")) else "" end)
+          (if ((.model // "") | length) > 0 then
+             "  " + (.model | gsub("[[:cntrl:]]"; "?") | gsub("[[:space:]]+"; " ") | .[0:64])
+           else "" end)
         ]
       | @tsv
     ' <<<"$json"
@@ -77,11 +100,18 @@ list_install_disks() {
 }
 
 validate_install_disk() {
-  local disk=$1 type ro removable size live_disk mounts
+  local disk=$1 canonical kname type ro removable size live_disk mounts descendants swap ancestor
   [[ -b $disk ]] || fail "$disk is not a block device"
+
+  canonical=$(readlink -e "$disk") || fail "could not canonicalize $disk"
+  [[ $canonical == /dev/* ]] || fail "$disk does not resolve beneath /dev"
+  [[ $canonical == "$disk" ]] || fail "installation disk must use its canonical path: $canonical"
 
   type=$(lsblk -dnro TYPE "$disk")
   [[ $type == disk ]] || fail "$disk is not a whole disk"
+
+  kname=$(lsblk -dnro KNAME "$disk")
+  [[ -n $kname && ! -e /sys/class/block/$kname/partition ]] || fail "$disk is a partition"
 
   ro=$(lsblk -dnro RO "$disk")
   [[ $ro == 0 ]] || fail "$disk is read-only"
@@ -97,18 +127,32 @@ validate_install_disk() {
 
   mounts=$(lsblk -nrpo MOUNTPOINTS "$disk" | tr -d '[:space:]')
   [[ -z $mounts ]] || fail "$disk or one of its partitions is mounted"
+
+  descendants=$(lsblk --json --paths --output PATH,TYPE "$disk")
+  jq -e '[.. | objects | .type? // empty] | all(. == "disk" or . == "part")' \
+    <<<"$descendants" >/dev/null || fail "$disk contains stacked block devices"
+
+  while IFS= read -r swap; do
+    [[ -n $swap ]] || continue
+    while IFS= read -r ancestor; do
+      [[ $(readlink -f "$ancestor") != "$disk" ]] || fail "$disk backs active swap"
+    done < <(lsblk -snrpo PATH "$swap" 2>/dev/null || true)
+  done < <(swapon --show=NAME --noheadings 2>/dev/null || true)
 }
 
 partition_path_from_json() {
-  local json=$1 number=$2
-  jq -er --argjson number "$number" '
-    [.. | objects | select((.partn? // 0) == $number) | .path][0]
+  local json=$1 number=$2 parent=$3 parttype=$4
+  jq -er \
+    --argjson number "$number" \
+    --arg parent "$parent" \
+    --arg parttype "${parttype,,}" '
+    [.. | objects |
+      select((.partn? // 0) == $number) |
+      select((.pkname? // "") == $parent) |
+      select(((.parttype? // "") | ascii_downcase) == $parttype) |
+      .path] as $matches
+    | select(($matches | length) == 1)
+    | $matches[0]
     | select(type == "string" and length > 0)
   ' <<<"$json"
-}
-
-partition_path() {
-  local disk=$1 number=$2 json
-  json=$(lsblk --json --paths --output PATH,PARTN "$disk")
-  partition_path_from_json "$json" "$number"
 }

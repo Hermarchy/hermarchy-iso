@@ -1,6 +1,7 @@
 #!/bin/bash
 
-set -euo pipefail
+set -Eeuo pipefail
+IFS=$'\n\t'
 
 readonly LIB_DIR=/usr/local/lib/hermarchy-installer
 # shellcheck source=profile/airootfs/usr/local/lib/hermarchy-installer/common.sh
@@ -8,6 +9,8 @@ source "$LIB_DIR/common.sh"
 
 readonly LOG_FILE=/var/log/hermarchy-install.log
 readonly TARGET=/mnt
+readonly ESP_GUID=c12a7328-f81f-11d2-ba4b-00a0c93ec93b
+readonly ROOT_GUID=4f68bce3-e8cd-4db1-96e7-fbcaf984b709
 INSTALL_SUCCEEDED=0
 
 usage() {
@@ -19,6 +22,9 @@ cleanup() {
   set +e
   sync
   if mountpoint -q "$TARGET"; then
+    if [[ -d $TARGET/var/log ]]; then
+      install -m 0600 "$LOG_FILE" "$TARGET/var/log/hermarchy-installer.log" || true
+    fi
     umount -R "$TARGET"
   fi
   if (( status != 0 || INSTALL_SUCCEEDED == 0 )); then
@@ -30,17 +36,24 @@ trap cleanup EXIT
 
 require_commands() {
   local command
-  for command in arch-chroot blkid bootctl findmnt genfstab jq lsblk mkfs.ext4 mkfs.fat mount mountpoint pacstrap partprobe readlink sgdisk udevadm umount wipefs; do
+  for command in arch-chroot blkid bootctl findmnt flock genfstab install jq lsblk mkfs.ext4 mkfs.fat mount mountpoint od pacstrap partprobe readlink sgdisk swapon systemctl udevadm umount uname wipefs; do
     command -v "$command" >/dev/null || fail "required command is missing: $command"
   done
 }
 
+verify_mount_source() {
+  local mountpoint_path=$1 expected=$2 actual
+  actual=$(findmnt -nro SOURCE --target "$mountpoint_path")
+  actual=$(readlink -f "$actual")
+  [[ $actual == "$expected" ]] || fail "$mountpoint_path is backed by $actual instead of $expected"
+}
+
 install_system() {
   local disk=$1 hostname=$2 username=$3 password=$4
-  local disk_json esp root root_uuid
+  local disk_json disk_kname esp root root_uuid fstab_tmp
 
   [[ $EUID == 0 ]] || fail "installer must run as root"
-  [[ -d /sys/firmware/efi ]] || fail "Hermarchy currently supports UEFI installation only"
+  validate_uefi_environment
   validate_install_disk "$disk"
   validate_hostname "$hostname" || fail "invalid hostname: $hostname"
   validate_username "$username" || fail "invalid username: $username"
@@ -48,19 +61,23 @@ install_system() {
   [[ $password != *:* && $password != *$'\n'* ]] || fail "password contains an unsupported colon or newline"
   mountpoint -q "$TARGET" && fail "$TARGET is already mounted"
 
-  log "Erasing and partitioning $disk"
+  disk_kname=$(lsblk -dnro KNAME "$disk")
+
+  log "Erasing partition metadata and repartitioning $disk"
   wipefs --all --force "$disk"
   sgdisk --zap-all "$disk"
   sgdisk --clear \
-    --new=1:0:+1GiB --typecode=1:ef00 --change-name=1:'EFI System' \
-    --new=2:0:0 --typecode=2:8300 --change-name=2:'Hermarchy Root' \
+    --new=1:0:+1GiB --typecode=1:"$ESP_GUID" --change-name=1:'EFI System' \
+    --new=2:0:0 --typecode=2:"$ROOT_GUID" --change-name=2:'Hermarchy Root' \
     "$disk"
   partprobe "$disk"
-  udevadm settle
+  udevadm settle --timeout=10
 
-  disk_json=$(lsblk --json --paths --output PATH,PARTN "$disk")
-  esp=$(partition_path_from_json "$disk_json" 1)
-  root=$(partition_path_from_json "$disk_json" 2)
+  disk_json=$(lsblk --json --paths --output PATH,PARTN,PKNAME,PARTTYPE "$disk")
+  esp=$(partition_path_from_json "$disk_json" 1 "$disk_kname" "$ESP_GUID")
+  root=$(partition_path_from_json "$disk_json" 2 "$disk_kname" "$ROOT_GUID")
+  esp=$(readlink -e "$esp")
+  root=$(readlink -e "$root")
   [[ -b $esp && -b $root ]] || fail "new partition devices were not created"
 
   log "Formatting $esp as FAT32"
@@ -69,20 +86,30 @@ install_system() {
   mkfs.ext4 -F -L HERMARCHY_ROOT "$root"
 
   mount "$root" "$TARGET"
-  mkdir -p "$TARGET/boot"
+  install -d -m 0755 "$TARGET/boot"
   mount "$esp" "$TARGET/boot"
+  verify_mount_source "$TARGET" "$root"
+  verify_mount_source "$TARGET/boot" "$esp"
 
   log "Installing the base Arch system"
   pacstrap -K "$TARGET" \
     base linux linux-firmware networkmanager sudo
 
-  genfstab -U "$TARGET" >"$TARGET/etc/fstab"
+  fstab_tmp="$TARGET/etc/fstab.hermarchy.tmp"
+  genfstab -U "$TARGET" >"$fstab_tmp"
+  if [[ $(<"$fstab_tmp") == *'/run/archiso'* ]]; then
+    fail "generated fstab references the live environment"
+  fi
+  findmnt --verify --tab-file "$fstab_tmp" >/dev/null
+  install -m 0644 "$fstab_tmp" "$TARGET/etc/fstab"
+  rm -f "$fstab_tmp"
 
   printf 'en_US.UTF-8 UTF-8\n' >"$TARGET/etc/locale.gen"
   arch-chroot "$TARGET" locale-gen
   printf 'LANG=en_US.UTF-8\n' >"$TARGET/etc/locale.conf"
   ln -sf /usr/share/zoneinfo/UTC "$TARGET/etc/localtime"
   arch-chroot "$TARGET" hwclock --systohc
+  arch-chroot "$TARGET" systemd-machine-id-setup
 
   printf '%s\n' "$hostname" >"$TARGET/etc/hostname"
   cat >"$TARGET/etc/hosts" <<EOF
@@ -94,24 +121,26 @@ EOF
   arch-chroot "$TARGET" useradd --create-home --groups wheel --shell /bin/bash "$username"
   printf '%s:%s\n' "$username" "$password" | arch-chroot "$TARGET" chpasswd
   unset password
+  arch-chroot "$TARGET" passwd --lock root
 
   install -d -m 0750 "$TARGET/etc/sudoers.d"
   printf '%%wheel ALL=(ALL:ALL) ALL\n' >"$TARGET/etc/sudoers.d/10-wheel"
   chmod 0440 "$TARGET/etc/sudoers.d/10-wheel"
-  arch-chroot "$TARGET" visudo --check --file=/etc/sudoers.d/10-wheel
-  arch-chroot "$TARGET" systemctl enable NetworkManager
+  arch-chroot "$TARGET" visudo --check --file=/etc/sudoers
+  systemctl --root="$TARGET" enable NetworkManager.service
 
   log "Installing systemd-boot"
-  bootctl --esp-path="$TARGET/boot" install
+  arch-chroot -S "$TARGET" bootctl --esp-path=/boot install
   root_uuid=$(blkid -s UUID -o value "$root")
-  [[ -n $root_uuid ]] || fail "could not determine root filesystem UUID"
+  [[ $root_uuid =~ ^[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}$ ]] ||
+    fail "could not determine a valid root filesystem UUID"
 
-  mkdir -p "$TARGET/boot/loader/entries"
+  install -d -m 0755 "$TARGET/boot/loader/entries"
   cat >"$TARGET/boot/loader/loader.conf" <<EOF
- default hermarchy.conf
- timeout 3
- console-mode keep
- editor no
+default hermarchy.conf
+timeout 3
+console-mode keep
+editor no
 EOF
   cat >"$TARGET/boot/loader/entries/hermarchy.conf" <<EOF
 title Hermarchy
@@ -119,6 +148,22 @@ linux /vmlinuz-linux
 initrd /initramfs-linux.img
 options root=UUID=$root_uuid rw
 EOF
+  cat >"$TARGET/boot/loader/entries/hermarchy-fallback.conf" <<EOF
+title Hermarchy (fallback initramfs)
+linux /vmlinuz-linux
+initrd /initramfs-linux-fallback.img
+options root=UUID=$root_uuid rw
+EOF
+
+  for boot_file in \
+    "$TARGET/boot/EFI/systemd/systemd-bootx64.efi" \
+    "$TARGET/boot/EFI/BOOT/BOOTX64.EFI" \
+    "$TARGET/boot/vmlinuz-linux" \
+    "$TARGET/boot/initramfs-linux.img" \
+    "$TARGET/boot/initramfs-linux-fallback.img"; do
+    [[ -f $boot_file ]] || fail "required boot file is missing: ${boot_file#"$TARGET"}"
+  done
+  arch-chroot -S "$TARGET" bootctl --esp-path=/boot is-installed >/dev/null
 
   printf '%s\n' \
     'channel=dev' \
@@ -131,7 +176,7 @@ EOF
 }
 
 main() {
-  local disk='' hostname='' username='' password_fd='' password
+  local disk='' hostname='' username='' password_fd='' password canonical_disk
   while (( $# > 0 )); do
     case $1 in
       --disk) disk=${2:-}; shift 2 ;;
@@ -148,14 +193,19 @@ main() {
     return 2
   }
   [[ $password_fd =~ ^[0-9]+$ ]] || fail "password file descriptor must be numeric"
-  IFS= read -r -d '' password <&"$password_fd" || true
 
   require_commands
-  install_system "$disk" "$hostname" "$username" "$password"
+  install -d -m 0755 /run/lock
+  exec 9>/run/lock/hermarchy-installer.lock
+  flock -n 9 || fail "another Hermarchy installer is already running"
+
+  canonical_disk=$(readlink -e "$disk") || fail "could not canonicalize installation disk: $disk"
+  IFS= read -r -d '' password <&"$password_fd" || true
+  install_system "$canonical_disk" "$hostname" "$username" "$password"
   unset password
 }
 
-mkdir -p "$(dirname "$LOG_FILE")"
+install -d -m 0755 "$(dirname "$LOG_FILE")"
 touch "$LOG_FILE"
 chmod 0600 "$LOG_FILE"
 exec > >(tee -a "$LOG_FILE") 2>&1

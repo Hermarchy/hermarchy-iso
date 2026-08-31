@@ -1,6 +1,7 @@
 #!/bin/bash
 
-set -euo pipefail
+set -Eeuo pipefail
+umask 077
 
 usage() {
   printf 'Usage: %s ISO SHA256_FILE BUILD_JSON\n' "$0" >&2
@@ -17,9 +18,28 @@ done
 for variable in R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_ENDPOINT R2_BUCKET; do
   [[ -n ${!variable:-} ]] || { echo "required environment variable is unset: $variable" >&2; exit 1; }
 done
-command -v jq >/dev/null || { echo 'jq is required' >&2; exit 1; }
-command -v rclone >/dev/null || { echo 'rclone is required' >&2; exit 1; }
+for command in jq mktemp openssl rclone sha256sum stat; do
+  command -v "$command" >/dev/null || { echo "$command is required" >&2; exit 1; }
+done
 
+iso_sha256=$(sha256sum "$iso" | cut -d' ' -f1)
+checksum_sha256=$(cut -d' ' -f1 "$checksum")
+[[ $checksum_sha256 == "$iso_sha256" ]] || {
+  echo 'checksum sidecar does not match the ISO' >&2
+  exit 1
+}
+iso_size=$(stat -c %s "$iso")
+jq -e \
+  --arg sha256 "$iso_sha256" \
+  --argjson size "$iso_size" \
+  '.channel == "dev" and .architecture == "x86_64" and .sha256 == $sha256 and .size == $size' \
+  "$manifest" >/dev/null || {
+    echo 'build manifest does not match the ISO' >&2
+    exit 1
+  }
+
+rclone_config=$(mktemp)
+export RCLONE_CONFIG="$rclone_config"
 export RCLONE_CONFIG_R2_TYPE=s3
 export RCLONE_CONFIG_R2_PROVIDER=Cloudflare
 export RCLONE_CONFIG_R2_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
@@ -30,7 +50,10 @@ export RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true
 
 run_id=${GITHUB_RUN_ID:-local}
 attempt=${GITHUB_RUN_ATTEMPT:-1}
-transaction="_transactions/${run_id}-${attempt}"
+[[ $run_id =~ ^([0-9]+|local)$ ]] || { echo 'invalid run ID' >&2; exit 1; }
+[[ $attempt =~ ^[0-9]+$ ]] || { echo 'invalid run attempt' >&2; exit 1; }
+nonce=$(openssl rand -hex 16)
+transaction="_transactions/${run_id}-${attempt}-${nonce}"
 staging="r2:${R2_BUCKET}/${transaction}/staging"
 rollback="r2:${R2_BUCKET}/${transaction}/rollback"
 current="r2:${R2_BUCKET}/dev"
@@ -46,70 +69,103 @@ remote_exists() {
   rclone size "$1" --json 2>/dev/null | jq -e '.count == 1' >/dev/null
 }
 
-verify_size() {
-  local local_file=$1 remote_file=$2 expected actual count
-  expected=$(stat -c %s "$local_file")
-  read -r count actual < <(rclone size "$remote_file" --json | jq -r '[.count,.bytes] | @tsv')
-  [[ $count == 1 && $actual == "$expected" ]] || {
-    echo "remote verification failed for $remote_file: count=$count bytes=$actual expected=$expected" >&2
+remote_sha256() {
+  rclone cat "$1" | sha256sum | cut -d' ' -f1
+}
+
+verify_content() {
+  local local_file=$1 remote_file=$2 expected actual
+  expected=$(sha256sum "$local_file" | cut -d' ' -f1)
+  actual=$(remote_sha256 "$remote_file")
+  [[ $actual == "$expected" ]] || {
+    echo "remote content verification failed for $remote_file" >&2
+    return 1
+  }
+}
+
+verify_remote_pair() {
+  local first=$1 second=$2 first_hash second_hash
+  first_hash=$(remote_sha256 "$first")
+  second_hash=$(remote_sha256 "$second")
+  [[ $first_hash == "$second_hash" ]] || {
+    echo "remote objects differ: $first and $second" >&2
     return 1
   }
 }
 
 remove_current_set() {
-  rclone deletefile "$current/$iso_name" 2>/dev/null || true
-  rclone deletefile "$current/$checksum_name" 2>/dev/null || true
-  rclone deletefile "$current/$manifest_name" 2>/dev/null || true
+  local failed=0 name
+  for name in "$iso_name" "$checksum_name" "$manifest_name"; do
+    if remote_exists "$current/$name"; then
+      rclone deletefile "$current/$name" || failed=1
+    fi
+  done
+  return "$failed"
 }
 
 restore_previous() {
-  (( rollback_ready )) || {
+  local name
+  if (( ! rollback_ready )); then
     remove_current_set
-    return 0
-  }
+    return
+  fi
+
   echo 'Restoring the previous dev ISO set after failed promotion' >&2
-  rclone copyto "$rollback/$iso_name" "$current/$iso_name"
-  rclone copyto "$rollback/$checksum_name" "$current/$checksum_name"
-  rclone copyto "$rollback/$manifest_name" "$current/$manifest_name"
+  for name in "$iso_name" "$checksum_name" "$manifest_name"; do
+    rclone copyto "$rollback/$name" "$current/$name"
+    verify_remote_pair "$rollback/$name" "$current/$name"
+  done
 }
 
 cleanup() {
-  local status=$?
+  local status=$? cleanup_status=$? rollback_status=0
   set +e
+  cleanup_status=$status
   if (( status != 0 && promotion_started && ! publish_succeeded )); then
-    restore_previous || echo 'WARNING: automatic rollback failed; inspect the R2 dev prefix' >&2
+    restore_previous
+    rollback_status=$?
+    if (( rollback_status != 0 )); then
+      echo 'ERROR: automatic rollback failed; the R2 dev set is indeterminate' >&2
+      cleanup_status=1
+    fi
   fi
-  rclone purge "r2:${R2_BUCKET}/${transaction}" >/dev/null 2>&1 || true
-  return "$status"
+  if ! rclone purge "r2:${R2_BUCKET}/${transaction}" >/dev/null 2>&1; then
+    echo "ERROR: could not remove R2 transaction prefix: $transaction" >&2
+    cleanup_status=1
+  fi
+  rm -f "$rclone_config"
+  return "$cleanup_status"
 }
 trap cleanup EXIT
 
-# Upload the complete candidate before touching the current set.
+# Upload and byte-verify the complete candidate before touching current keys.
 rclone copyto "$iso" "$staging/$iso_name"
 rclone copyto "$checksum" "$staging/$checksum_name"
 rclone copyto "$manifest" "$staging/$manifest_name"
-verify_size "$iso" "$staging/$iso_name"
-verify_size "$checksum" "$staging/$checksum_name"
-verify_size "$manifest" "$staging/$manifest_name"
+verify_content "$iso" "$staging/$iso_name"
+verify_content "$checksum" "$staging/$checksum_name"
+verify_content "$manifest" "$staging/$manifest_name"
 
-# A current set is valid only when all three objects exist. Preserve it for rollback.
+# A previous set is rollback-capable only when all three objects exist.
 if remote_exists "$current/$iso_name" &&
    remote_exists "$current/$checksum_name" &&
    remote_exists "$current/$manifest_name"; then
-  rclone copyto "$current/$iso_name" "$rollback/$iso_name"
-  rclone copyto "$current/$checksum_name" "$rollback/$checksum_name"
-  rclone copyto "$current/$manifest_name" "$rollback/$manifest_name"
+  for name in "$iso_name" "$checksum_name" "$manifest_name"; do
+    rclone copyto "$current/$name" "$rollback/$name"
+    verify_remote_pair "$current/$name" "$rollback/$name"
+  done
   rollback_ready=1
 fi
 
+# R2 has no multi-object transaction. Promote the manifest last and retain the
+# byte-verified rollback set until every current object is byte-verified.
 promotion_started=1
-# Manifest is the commit marker and is promoted last.
 rclone copyto "$staging/$iso_name" "$current/$iso_name"
 rclone copyto "$staging/$checksum_name" "$current/$checksum_name"
 rclone copyto "$staging/$manifest_name" "$current/$manifest_name"
-verify_size "$iso" "$current/$iso_name"
-verify_size "$checksum" "$current/$checksum_name"
-verify_size "$manifest" "$current/$manifest_name"
+verify_content "$iso" "$current/$iso_name"
+verify_content "$checksum" "$current/$checksum_name"
+verify_content "$manifest" "$current/$manifest_name"
 publish_succeeded=1
 
 printf 'Published current dev ISO set to r2:%s/dev/\n' "$R2_BUCKET"

@@ -7,6 +7,7 @@ PROFILE="$ROOT/profile"
 RELEASE="$ROOT/release"
 WORK="$ROOT/.work"
 STAGED_PROFILE="$WORK/profile"
+readonly ARCHISO_BUILD_IMAGE='archlinux@sha256:b860afd5823683f7ea389ba5f00d812f4fe55f6f286dea329d2abeefa535e309'
 
 usage() {
   printf 'Usage: %s [--clean]\n' "$0"
@@ -60,7 +61,7 @@ fi
   -v "$STAGED_PROFILE:/profile:ro" \
   -v "$WORK/mkarchiso:/work" \
   -v "$RELEASE:/out" \
-  archlinux:latest \
+  "$ARCHISO_BUILD_IMAGE" \
   bash -euo pipefail -c '
     pacman -Syu --noconfirm archiso
     rm -rf /work/*

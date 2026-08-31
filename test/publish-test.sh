@@ -43,6 +43,10 @@ case $command in
       printf '{"count":0,"bytes":0}\n'
     fi
     ;;
+  cat)
+    path=$(map_path "$1")
+    /usr/bin/cat "$path"
+    ;;
   purge)
     path=$(map_path "$1")
     rm -rf "$path"
@@ -68,10 +72,13 @@ export R2_BUCKET=bucket
 export GITHUB_RUN_ATTEMPT=1
 
 make_set() {
-  local prefix=$1 payload=$2
+  local prefix=$1 payload=$2 sha size
   printf '%s\n' "$payload" >"$TMP/$prefix.iso"
-  (cd "$TMP" && sha256sum "$prefix.iso" >"$prefix.sha256")
-  printf '{"payload":"%s"}\n' "$payload" >"$TMP/$prefix.json"
+  sha=$(sha256sum "$TMP/$prefix.iso" | cut -d' ' -f1)
+  size=$(stat -c %s "$TMP/$prefix.iso")
+  printf '%s  hermarchy-dev-x86_64.iso\n' "$sha" >"$TMP/$prefix.sha256"
+  printf '{"channel":"dev","architecture":"x86_64","sha256":"%s","size":%s,"payload":"%s"}\n' \
+    "$sha" "$size" "$payload" >"$TMP/$prefix.json"
 }
 
 publish() {

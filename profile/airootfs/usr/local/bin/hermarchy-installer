@@ -42,17 +42,17 @@ choose_disk() {
 }
 
 main() {
-  local disk hostname username password confirm_password confirmation status
+  local disk hostname username password confirm_password confirmation status uefi_error
 
   [[ $EUID == 0 ]] || fail "installer must run as root"
   [[ $(tty) == /dev/tty1 ]] || fail "installer must run on tty1"
 
-  message "Welcome to the experimental Hermarchy development installer.\n\nThis version supports only x86_64 UEFI systems and erases an entire disk. It does not support encryption, dual boot, or partition preservation."
+  message "Welcome to the experimental Hermarchy development installer.\n\nThis version supports only x86_64 UEFI systems and destructively repartitions and formats an entire disk. This is not a forensic secure erase. It does not support encryption, dual boot, or partition preservation."
 
-  [[ -d /sys/firmware/efi ]] || {
-    message "This machine was not booted in UEFI mode. Hermarchy cannot install here yet."
+  if ! uefi_error=$(validate_uefi_environment 2>&1); then
+    message "This machine does not meet the firmware requirements.\n\n$uefi_error"
     return 1
-  }
+  fi
 
   if ! curl --fail --silent --show-error --head --connect-timeout 10 https://geo.mirror.pkgbuild.com/ >/dev/null; then
     message "No working network connection was detected. Connect to the network and run hermarchy-installer again."
@@ -85,8 +85,8 @@ main() {
   done
   unset confirm_password
 
-  confirmation=$(input_value "FINAL WARNING\n\nAll data on $disk will be destroyed.\n\nType the exact disk path to continue:") || return 1
-  if [[ $confirmation != "$disk" ]]; then
+  confirmation=$(input_value "FINAL WARNING\n\nAll data on $disk will be destroyed.\n\nType ERASE $disk to continue:") || return 1
+  if [[ $confirmation != "ERASE $disk" ]]; then
     unset password
     message "Confirmation did not match. No disks were changed."
     return 1

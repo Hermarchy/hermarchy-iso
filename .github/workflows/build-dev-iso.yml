@@ -18,14 +18,16 @@ concurrency:
 jobs:
   build-and-publish:
     name: Build, verify, and replace current dev ISO
+    if: github.ref == 'refs/heads/dev'
     runs-on: ubuntu-latest
     environment: dev-iso
-    timeout-minutes: 90
+    timeout-minutes: 180
 
     steps:
       - name: Check out dev source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 0
 
@@ -43,7 +45,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install --yes jq rclone shellcheck
+          sudo apt-get install --yes jq openssl rclone shellcheck
 
       - name: Run tests
         run: ./test/all
@@ -114,11 +116,16 @@ jobs:
         run: |
           set -euo pipefail
           curl_args=(--fail --silent --show-error --location --retry 5 --retry-all-errors)
-          actual_size=$(curl "${curl_args[@]}" --head "$ISO_URL" |
-            tr -d '\r' |
-            perl -ne 'if (/^content-length:\s*(\d+)/i) { $n=$1 } END { print $n // "" }')
+          public_iso="$RUNNER_TEMP/hermarchy-dev-public.iso"
+          curl "${curl_args[@]}" --output "$public_iso" "$ISO_URL"
+          actual_size=$(stat -c %s "$public_iso")
           [[ $actual_size == "$EXPECTED_SIZE" ]] || {
             echo "Public object size mismatch: actual=$actual_size expected=$EXPECTED_SIZE" >&2
+            exit 1
+          }
+          downloaded_sha256=$(sha256sum "$public_iso" | cut -d' ' -f1)
+          [[ $downloaded_sha256 == "$EXPECTED_SHA256" ]] || {
+            echo "Public ISO checksum mismatch: actual=$downloaded_sha256 expected=$EXPECTED_SHA256" >&2
             exit 1
           }
 

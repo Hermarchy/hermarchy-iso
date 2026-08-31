@@ -19,6 +19,9 @@ for required in (
     'R2_ACCESS_KEY_ID',
     './bin/publish-dev-iso',
     'Verify public download set',
+    "if: github.ref == 'refs/heads/dev'",
+    'ref: ${{ github.sha }}',
+    'hermarchy-dev-public.iso',
     '$ISO_URL.sha256',
     '$base_url/build.json',
 ):

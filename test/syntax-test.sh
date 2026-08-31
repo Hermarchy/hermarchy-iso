@@ -15,6 +15,7 @@ files=(
   "$ROOT/test/installer-test.sh"
   "$ROOT/test/profile-test.sh"
   "$ROOT/test/publish-test.sh"
+  "$ROOT/test/security-test.sh"
   "$ROOT/test/shellcheck-test.sh"
   "$ROOT/test/syntax-test.sh"
   "$ROOT/test/workflow-test.sh"
