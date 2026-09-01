@@ -43,7 +43,7 @@ choose_disk() {
 }
 
 main() {
-  local disk disk_fd disk_handle disk_identity hostname username password confirm_password confirmation status uefi_error
+  local disk disk_fd disk_handle disk_identity hostname username password confirm_password confirmation status uefi_error identity_error
 
   [[ $EUID == 0 ]] || fail "installer must run as root"
   [[ $(tty) == /dev/tty1 ]] || fail "installer must run on tty1"
@@ -75,6 +75,10 @@ main() {
     message "The selected disk identity could not be read safely."
     return 1
   }
+  if ! identity_error=$(validate_disk_identity_for_environment "$disk_identity" 2>&1); then
+    message "The selected disk cannot be bound safely.\n\n$identity_error"
+    return 1
+  fi
 
   while :; do
     hostname=$(input_value "Hostname:" "archlinux") || return 1

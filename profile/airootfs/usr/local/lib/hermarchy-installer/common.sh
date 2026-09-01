@@ -253,6 +253,23 @@ disk_identity_from_json() {
   ' <<<"$json"
 }
 
+disk_identity_has_stable_id() {
+  local identity=$1
+  jq -e '
+    type == "array" and length == 6 and
+    (((.[4] // "") | type == "string" and length > 0) or
+     ((.[5] // "") | type == "string" and length > 0))
+  ' <<<"$identity" >/dev/null
+}
+
+validate_disk_identity_for_environment() {
+  local identity=$1
+  if ! systemd-detect-virt --quiet && ! disk_identity_has_stable_id "$identity"; then
+    fail "physical installation disks must expose a serial number or WWN"
+    return 1
+  fi
+}
+
 installation_disk_identity() {
   local disk=$1 json
   json=$(lsblk --nodeps --json --bytes --paths \

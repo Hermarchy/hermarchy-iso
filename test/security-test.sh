@@ -32,6 +32,7 @@ required_engine = (
     '--confirm-identity',
     'confirmation disk does not exactly match',
     'installation disk identity changed before erasure',
+    'validate_disk_identity_for_environment "$confirm_identity"',
     'validate_uefi_environment',
     'validate_install_disk "$disk"',
     'arch-chroot -S "$TARGET" bootctl',

@@ -241,6 +241,7 @@ main() {
     fail "confirmation disk does not exactly match the canonical installation disk: $canonical_disk"
   current_identity=$(installation_disk_identity "$canonical_disk") || fail "could not read installation disk identity"
   [[ $current_identity == "$confirm_identity" ]] || fail "confirmation identity does not match the selected installation disk"
+  validate_disk_identity_for_environment "$confirm_identity"
   disk_handle="/proc/self/fd/$disk_fd"
   [[ -b $disk_handle ]] || fail "inherited installation disk handle is not a block device"
   handle_identity=$(installation_disk_identity "$disk_handle") || fail "could not read inherited installation disk handle identity"

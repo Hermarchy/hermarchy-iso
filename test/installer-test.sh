@@ -161,3 +161,23 @@ assert_equal \
   'disk identity token'
 assert_failure disk_identity_from_json '{"blockdevices":[]}'
 pass 'disk identity snapshot uses path, device number, size, model, serial, and WWN'
+
+assert_success disk_identity_has_stable_id '["/dev/sda","8:0",1000,"Disk","serial-1",""]'
+assert_success disk_identity_has_stable_id '["/dev/sda","8:0",1000,"Disk","","wwn-1"]'
+assert_failure disk_identity_has_stable_id '["/dev/sda","8:0",1000,"Disk","",""]'
+pass 'physical disk identity requires a serial number or WWN'
+
+(
+  # Called indirectly by validate_disk_identity_for_environment.
+  # shellcheck disable=SC2329
+  systemd-detect-virt() { return 1; }
+  assert_success validate_disk_identity_for_environment '["/dev/sda","8:0",1000,"Disk","serial-1",""]'
+  assert_failure validate_disk_identity_for_environment '["/dev/sda","8:0",1000,"Disk","",""]'
+)
+(
+  # Called indirectly by validate_disk_identity_for_environment.
+  # shellcheck disable=SC2329
+  systemd-detect-virt() { return 0; }
+  assert_success validate_disk_identity_for_environment '["/dev/vda","252:0",1000,"Virtio","",""]'
+)
+pass 'virtual disks may rely on the inherited open handle when stable IDs are absent'
