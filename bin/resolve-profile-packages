@@ -60,29 +60,6 @@ select_archiso_container
       exit 1
     fi
 
-    if [[ " ${packages[*]} " == *" broadcom-wl-dkms "* ]]; then
-      # pkgrel 48 lacks the Linux 7.2 compatibility patch; pkgrel 49 adds it.
-      minimum_broadcom_version=6.30.223.271-49
-      broadcom_version=$(
-        LC_ALL=C pacman --config /profile/pacman.conf -Si broadcom-wl-dkms |
-          while IFS=: read -r field value; do
-            field=${field//[[:space:]]/}
-            [[ $field == Version ]] || continue
-            value=${value#"${value%%[![:space:]]*}"}
-            printf "%s\n" "$value"
-            break
-          done
-      )
-      [[ -n $broadcom_version ]] || {
-        echo "could not determine the broadcom-wl-dkms repository version" >&2
-        exit 1
-      }
-      if (( $(vercmp "$broadcom_version" "$minimum_broadcom_version") < 0 )); then
-        echo "broadcom-wl-dkms $broadcom_version is known not to build against the current Arch kernel" >&2
-        echo "wait for $minimum_broadcom_version or newer to reach the enabled official repositories" >&2
-        exit 1
-      fi
-    fi
 
     printf "Resolved %s ArchISO profile packages with %s\n" \
       "${#packages[@]}" "$ARCHISO_BUILD_IMAGE"

@@ -17,6 +17,7 @@ trap 'rm -rf "$TMP"' EXIT
 
 assert_success validate_hostname hermarchy
 assert_success validate_hostname hermarchy-dev
+assert_failure validate_hostname ArchLinux
 assert_failure validate_hostname '-bad'
 assert_failure validate_hostname 'bad-'
 assert_failure validate_hostname 'bad.name'
@@ -43,22 +44,52 @@ assert_equal "$(cpu_vendor_from_cpuinfo "$TMP/missing")" '' 'missing CPU vendor 
 assert_equal "$(microcode_package_for_vendor GenuineIntel)" intel-ucode 'Intel microcode package'
 assert_equal "$(microcode_package_for_vendor AuthenticAMD)" amd-ucode 'AMD microcode package'
 assert_equal "$(microcode_package_for_vendor UnknownVendor)" '' 'unknown CPU microcode package'
-assert_equal "$(microcode_blob_for_vendor GenuineIntel)" kernel/x86/microcode/GenuineIntel.bin 'Intel microcode blob'
-assert_equal "$(microcode_blob_for_vendor AuthenticAMD)" kernel/x86/microcode/AuthenticAMD.bin 'AMD microcode blob'
-assert_equal "$(microcode_blob_for_vendor UnknownVendor)" '' 'unknown CPU microcode blob'
 pass 'CPU microcode selection'
 
-write_systemd_boot_entry \
-  "$TMP/hermarchy.conf" 'Hermarchy' /initramfs-linux.img \
-  01234567-89ab-cdef-0123-456789abcdef
-expected_entry=$'title Hermarchy\nlinux /vmlinuz-linux\ninitrd /initramfs-linux.img\noptions root=UUID=01234567-89ab-cdef-0123-456789abcdef rw'
-assert_equal "$(<"$TMP/hermarchy.conf")" "$expected_entry" 'combined-microcode boot entry'
-pass 'systemd-boot entry generation'
+(
+  # Called indirectly by validate_uefi_environment.
+  # shellcheck disable=SC2329
+  uname() { printf 'aarch64\n'; }
+  assert_failure validate_uefi_environment
+)
+assert_failure validate_install_disk /definitely-not-a-block-device
+pass 'safety validators return failure in conditional contexts'
 
-write_mkinitcpio_preset "$TMP/linux.preset"
-expected_preset=$'# Hermarchy target preset: retain an all-modules fallback image.\nALL_kver="/boot/vmlinuz-linux"\nPRESETS=(\'default\' \'fallback\')\ndefault_image="/boot/initramfs-linux.img"\nfallback_image="/boot/initramfs-linux-fallback.img"\nfallback_options="-S autodetect"'
-assert_equal "$(<"$TMP/linux.preset")" "$expected_preset" 'target mkinitcpio preset'
-pass 'fallback initramfs preset generation'
+assert_equal "$(target_mount_conflict /mnt <<<'/mnt')" /mnt 'exact target mount conflict'
+assert_equal "$(target_mount_conflict /mnt <<<'/mnt/data')" /mnt/data 'nested target mount conflict'
+if target_mount_conflict /mnt <<<'/mnt-other' >/dev/null; then
+  fail_test 'sibling mount must not conflict with installer target'
+fi
+pass 'installer target mount conflict detection'
+
+(
+  TEST_SOURCE=/dev/sda1
+  findmnt() { printf '%s\n' "$TEST_SOURCE"; }
+  readlink() { printf '%s\n' "${*: -1}"; }
+  lsblk() {
+    local args=$*
+    case $args in
+      *TYPE*/dev/sda1) printf 'part\n' ;;
+      *PKNAME*/dev/sda1) printf 'sda\n' ;;
+      *TYPE*/dev/sda) printf 'disk\n' ;;
+      *TYPE*/dev/loop0) printf 'loop\n' ;;
+      *TYPE*/dev/sr0) printf 'rom\n' ;;
+    esac
+  }
+  assert_equal "$(find_live_disk)" /dev/sda 'live partition parent disk'
+  TEST_SOURCE=/dev/loop0
+  assert_failure find_live_disk
+  TEST_SOURCE=/dev/sr0
+  assert_equal "$(find_live_disk)" '' 'optical live medium has no writable parent disk'
+)
+pass 'live installation medium resolution fails closed'
+
+write_systemd_boot_entry \
+  "$TMP/arch.conf" 'Arch Linux' /initramfs-linux.img \
+  01234567-89ab-cdef-0123-456789abcdef
+expected_entry=$'title Arch Linux\nlinux /vmlinuz-linux\ninitrd /initramfs-linux.img\noptions root=UUID=01234567-89ab-cdef-0123-456789abcdef rw'
+assert_equal "$(<"$TMP/arch.conf")" "$expected_entry" 'combined-microcode boot entry'
+pass 'systemd-boot entry generation'
 
 fixture='{
   "blockdevices": [

@@ -6,7 +6,6 @@ ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 PROFILE="$ROOT/profile"
 RELEASE="$ROOT/release"
 WORK="$ROOT/.work"
-STAGED_PROFILE="$WORK/profile"
 # shellcheck source=bin/lib/archiso-container.sh
 source "$ROOT/bin/lib/archiso-container.sh"
 
@@ -30,23 +29,13 @@ select_archiso_container
   exit 1
 }
 
-commit=$(git -C "$ROOT" rev-parse HEAD)
 short_commit=$(git -C "$ROOT" rev-parse --short=12 HEAD)
-built_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
 source_epoch=$(git -C "$ROOT" show -s --format=%ct HEAD)
 
 if (( clean )); then
   rm -rf "$WORK" "$RELEASE"
 fi
-rm -rf "$STAGED_PROFILE"
-mkdir -p "$STAGED_PROFILE" "$RELEASE" "$WORK/mkarchiso"
-cp -a "$PROFILE/." "$STAGED_PROFILE/"
-cat >"$STAGED_PROFILE/airootfs/etc/hermarchy-build" <<EOF
-channel=dev
-architecture=x86_64
-iso_commit=$commit
-built_at=$built_at
-EOF
+mkdir -p "$RELEASE" "$WORK/mkarchiso"
 
 # HOST_UID/HOST_GID expand inside the container shell, not in this shell.
 # shellcheck disable=SC2016
@@ -54,7 +43,7 @@ EOF
   -e SOURCE_DATE_EPOCH="$source_epoch" \
   -e HOST_UID="$(id -u)" \
   -e HOST_GID="$(id -g)" \
-  -v "$STAGED_PROFILE:/profile:ro" \
+  -v "$PROFILE:/profile:ro" \
   -v "$WORK/mkarchiso:/work" \
   -v "$RELEASE:/out" \
   "$ARCHISO_BUILD_IMAGE" \

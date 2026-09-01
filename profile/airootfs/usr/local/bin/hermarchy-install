@@ -12,31 +12,36 @@ readonly TARGET=/mnt
 readonly ESP_GUID=c12a7328-f81f-11d2-ba4b-00a0c93ec93b
 readonly ROOT_GUID=4f68bce3-e8cd-4db1-96e7-fbcaf984b709
 INSTALL_SUCCEEDED=0
+INSTALL_ATTEMPTED=0
+TARGET_MOUNTED=0
 
 usage() {
-  printf 'Usage: hermarchy-install --disk DISK --hostname NAME --username USER --password-fd FD\n' >&2
+  printf 'Usage: hermarchy-install --disk DISK --confirm-disk DISK --hostname NAME --username USER --password-fd FD\n' >&2
 }
 
 cleanup() {
-  local status=$?
+  local status=$? cleanup_status
+  cleanup_status=$status
   set +e
-  sync
-  if mountpoint -q "$TARGET"; then
-    if [[ -d $TARGET/var/log ]]; then
-      install -m 0600 "$LOG_FILE" "$TARGET/var/log/hermarchy-installer.log" || true
-    fi
-    umount -R "$TARGET"
+  if (( INSTALL_ATTEMPTED )); then
+    sync || cleanup_status=1
   fi
-  if (( status != 0 || INSTALL_SUCCEEDED == 0 )); then
+  if (( TARGET_MOUNTED )); then
+    if [[ -d $TARGET/var/log ]]; then
+      install -m 0600 "$LOG_FILE" "$TARGET/var/log/hermarchy-installer.log" || cleanup_status=1
+    fi
+    umount -R "$TARGET" || cleanup_status=1
+  fi
+  if (( INSTALL_ATTEMPTED && (cleanup_status != 0 || INSTALL_SUCCEEDED == 0) )); then
     printf '[hermarchy] Installation failed. Log: %s\n' "$LOG_FILE" >&2
   fi
-  return "$status"
+  return "$cleanup_status"
 }
 trap cleanup EXIT
 
 require_commands() {
   local command
-  for command in arch-chroot blkid bootctl findmnt flock genfstab install jq lsblk mkfs.ext4 mkfs.fat mount mountpoint od pacstrap partprobe readlink sgdisk swapon systemctl systemd-detect-virt udevadm umount uname wipefs; do
+  for command in arch-chroot blkid bootctl findmnt flock genfstab install jq lsblk mkfs.ext4 mkfs.fat mount mountpoint od pacman pacstrap partprobe readlink sgdisk swapon systemctl systemd-detect-virt udevadm umount uname wipefs; do
     command -v "$command" >/dev/null || fail "required command is missing: $command"
   done
 }
@@ -50,7 +55,7 @@ verify_mount_source() {
 
 install_system() {
   local disk=$1 hostname=$2 username=$3 password=$4
-  local disk_json disk_kname esp root root_uuid fstab_tmp cpu_vendor microcode_package microcode_blob initramfs initramfs_early boot_file
+  local disk_json disk_kname esp root root_uuid fstab_tmp cpu_vendor microcode_package boot_file existing_mount mount_targets
   local -a target_packages=(base linux linux-firmware mkinitcpio networkmanager sudo)
   local -a boot_files
 
@@ -62,7 +67,32 @@ install_system() {
   [[ -n $password ]] || fail "password must not be empty"
   [[ $password != *:* && $password != *$'\n'* ]] || fail "password contains an unsupported colon or newline"
   mountpoint -q "$TARGET" && fail "$TARGET is already mounted"
+  mount_targets=$(findmnt -rn -o TARGET) || fail 'could not inspect current mount targets'
+  if existing_mount=$(target_mount_conflict "$TARGET" <<<"$mount_targets"); then
+    fail "$TARGET or one of its descendants is already mounted: $existing_mount"
+  fi
 
+  cpu_vendor=''
+  microcode_package=''
+  if systemd-detect-virt --quiet; then
+    log 'Virtual machine detected; CPU microcode remains the host responsibility'
+  else
+    cpu_vendor=$(cpu_vendor_from_cpuinfo)
+    microcode_package=$(microcode_package_for_vendor "$cpu_vendor")
+    if [[ -n $microcode_package ]]; then
+      target_packages+=("$microcode_package")
+      log "Installing $microcode_package for CPU vendor $cpu_vendor"
+    else
+      log "No Arch microcode package is available for CPU vendor ${cpu_vendor:-unknown}; continuing without one"
+    fi
+  fi
+
+  log 'Validating current official Arch package repositories'
+  pacman -Sy --noconfirm
+  pacman -Sp --noconfirm -- "${target_packages[@]}" >/dev/null ||
+    fail 'target package transaction could not be resolved'
+
+  validate_install_disk "$disk"
   disk_kname=$(lsblk -dnro KNAME "$disk")
 
   log "Erasing partition metadata and repartitioning $disk"
@@ -70,12 +100,12 @@ install_system() {
   sgdisk --zap-all "$disk"
   sgdisk --clear \
     --new=1:0:+1GiB --typecode=1:"$ESP_GUID" --change-name=1:'EFI System' \
-    --new=2:0:0 --typecode=2:"$ROOT_GUID" --change-name=2:'Hermarchy Root' \
+    --new=2:0:0 --typecode=2:"$ROOT_GUID" --change-name=2:'Linux root (x86-64)' \
     "$disk"
   partprobe "$disk"
   udevadm settle --timeout=10
 
-  disk_json=$(lsblk --json --paths --output PATH,PARTN,PKNAME,PARTTYPE "$disk")
+  disk_json=$(lsblk --tree --json --paths --output PATH,PARTN,PKNAME,PARTTYPE "$disk")
   esp=$(partition_path_from_json "$disk_json" 1 "$disk_kname" "$ESP_GUID")
   root=$(partition_path_from_json "$disk_json" 2 "$disk_kname" "$ROOT_GUID")
   esp=$(readlink -e "$esp")
@@ -83,44 +113,19 @@ install_system() {
   [[ -b $esp && -b $root ]] || fail "new partition devices were not created"
 
   log "Formatting $esp as FAT32"
-  mkfs.fat -F 32 -n HERMARCHY_EFI "$esp"
+  mkfs.fat -F 32 -n EFI "$esp"
   log "Formatting $root as ext4"
-  mkfs.ext4 -F -L HERMARCHY_ROOT "$root"
+  mkfs.ext4 -F -L root "$root"
 
   mount "$root" "$TARGET"
+  TARGET_MOUNTED=1
   install -d -m 0755 "$TARGET/boot"
   mount "$esp" "$TARGET/boot"
   verify_mount_source "$TARGET" "$root"
   verify_mount_source "$TARGET/boot" "$esp"
 
-  cpu_vendor=''
-  microcode_package=''
-  microcode_blob=''
-  if systemd-detect-virt --quiet; then
-    log 'Virtual machine detected; CPU microcode remains the host responsibility'
-  else
-    cpu_vendor=$(cpu_vendor_from_cpuinfo)
-    microcode_package=$(microcode_package_for_vendor "$cpu_vendor")
-    microcode_blob=$(microcode_blob_for_vendor "$cpu_vendor")
-    if [[ -n $microcode_package ]]; then
-      target_packages+=("$microcode_package")
-      log "Installing $microcode_package for CPU vendor $cpu_vendor"
-    else
-      fail "unsupported physical CPU vendor: ${cpu_vendor:-unknown}; Hermarchy currently supports Intel and AMD"
-    fi
-  fi
-
   log "Installing the base Arch system"
   pacstrap -K "$TARGET" "${target_packages[@]}"
-  write_mkinitcpio_preset "$TARGET/etc/mkinitcpio.d/linux.preset"
-  arch-chroot "$TARGET" mkinitcpio -P
-  if [[ -n $microcode_blob ]]; then
-    for initramfs in /boot/initramfs-linux.img /boot/initramfs-linux-fallback.img; do
-      initramfs_early=$(arch-chroot "$TARGET" lsinitcpio --early "$initramfs")
-      [[ $initramfs_early == *"$microcode_blob"* ]] ||
-        fail "$initramfs does not contain early CPU microcode: $microcode_blob"
-    done
-  fi
 
   fstab_tmp="$TARGET/etc/fstab.hermarchy.tmp"
   genfstab -U "$TARGET" >"$fstab_tmp"
@@ -155,6 +160,7 @@ EOF
   chmod 0440 "$TARGET/etc/sudoers.d/10-wheel"
   arch-chroot "$TARGET" visudo --check --file=/etc/sudoers
   systemctl --root="$TARGET" enable NetworkManager.service
+  systemctl --root="$TARGET" is-enabled NetworkManager.service >/dev/null
 
   log "Installing systemd-boot"
   arch-chroot -S "$TARGET" bootctl --esp-path=/boot install
@@ -164,34 +170,26 @@ EOF
 
   install -d -m 0755 "$TARGET/boot/loader/entries"
   cat >"$TARGET/boot/loader/loader.conf" <<EOF
-default hermarchy.conf
+default arch.conf
 timeout 3
 console-mode keep
 editor no
 EOF
   write_systemd_boot_entry \
-    "$TARGET/boot/loader/entries/hermarchy.conf" \
-    'Hermarchy' /initramfs-linux.img "$root_uuid"
-  write_systemd_boot_entry \
-    "$TARGET/boot/loader/entries/hermarchy-fallback.conf" \
-    'Hermarchy (fallback initramfs)' /initramfs-linux-fallback.img "$root_uuid"
+    "$TARGET/boot/loader/entries/arch.conf" \
+    'Arch Linux' /initramfs-linux.img "$root_uuid"
 
   boot_files=(
     "$TARGET/boot/EFI/systemd/systemd-bootx64.efi"
     "$TARGET/boot/EFI/BOOT/BOOTX64.EFI"
     "$TARGET/boot/vmlinuz-linux"
     "$TARGET/boot/initramfs-linux.img"
-    "$TARGET/boot/initramfs-linux-fallback.img"
   )
   for boot_file in "${boot_files[@]}"; do
     [[ -f $boot_file ]] || fail "required boot file is missing: ${boot_file#"$TARGET"}"
   done
   arch-chroot -S "$TARGET" bootctl --esp-path=/boot is-installed >/dev/null
-
-  printf '%s\n' \
-    'channel=dev' \
-    'installer=hermarchy-basic' \
-    >"$TARGET/etc/hermarchy-release"
+  arch-chroot -S "$TARGET" bootctl --esp-path=/boot list >/dev/null
 
   sync
   INSTALL_SUCCEEDED=1
@@ -199,10 +197,11 @@ EOF
 }
 
 main() {
-  local disk='' hostname='' username='' password_fd='' password canonical_disk
+  local disk='' confirm_disk='' hostname='' username='' password_fd='' password canonical_disk
   while (( $# > 0 )); do
     case $1 in
       --disk) disk=${2:-}; shift 2 ;;
+      --confirm-disk) confirm_disk=${2:-}; shift 2 ;;
       --hostname) hostname=${2:-}; shift 2 ;;
       --username) username=${2:-}; shift 2 ;;
       --password-fd) password_fd=${2:-}; shift 2 ;;
@@ -211,7 +210,7 @@ main() {
     esac
   done
 
-  [[ -n $disk && -n $hostname && -n $username && -n $password_fd ]] || {
+  [[ -n $disk && -n $confirm_disk && -n $hostname && -n $username && -n $password_fd ]] || {
     usage
     return 2
   }
@@ -223,7 +222,10 @@ main() {
   flock -n 9 || fail "another Hermarchy installer is already running"
 
   canonical_disk=$(readlink -e "$disk") || fail "could not canonicalize installation disk: $disk"
+  [[ $confirm_disk == "$canonical_disk" ]] ||
+    fail "confirmation disk does not exactly match the canonical installation disk: $canonical_disk"
   IFS= read -r -d '' password <&"$password_fd" || true
+  INSTALL_ATTEMPTED=1
   install_system "$canonical_disk" "$hostname" "$username" "$password"
   unset password
 }

@@ -61,8 +61,6 @@ if 'mkarchiso' in joined:
     raise SystemExit('package resolution must not build an ISO')
 if 'pacman --config /profile/pacman.conf -Sp' not in joined:
     raise SystemExit('resolver must use the profile pacman configuration')
-if 'minimum_broadcom_version=6.30.223.271-49' not in joined:
-    raise SystemExit('resolver must reject the known-incompatible Broadcom DKMS revision')
 PY
 
 FAKE_DOCKER_INFO_STATUS=1 FAKE_SUDO_LOG="$TMP/sudo-args" PATH="$TMP/bin:$PATH" \

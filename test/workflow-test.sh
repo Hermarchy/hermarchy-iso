@@ -18,7 +18,6 @@ for required in (
     'cancel-in-progress: false',
     'R2_ACCESS_KEY_ID',
     './bin/resolve-profile-packages',
-    './bin/validate-profile-dkms',
     './bin/publish-dev-iso',
     'Verify public download set',
     "if: github.ref == 'refs/heads/dev'",

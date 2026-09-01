@@ -54,8 +54,8 @@ main() {
     return 1
   fi
 
-  if ! curl --fail --silent --show-error --head --connect-timeout 10 https://geo.mirror.pkgbuild.com/ >/dev/null; then
-    message "No working network connection was detected. Connect to the network and run hermarchy-installer again."
+  if ! pacman -Sy --noconfirm >/dev/null 2>&1; then
+    message "The configured official Arch repositories could not be synchronized. Connect to the network and run hermarchy-installer again."
     return 1
   fi
 
@@ -63,13 +63,13 @@ main() {
   validate_install_disk "$disk"
 
   while :; do
-    hostname=$(input_value "Hostname:" "hermarchy") || return 1
+    hostname=$(input_value "Hostname:" "archlinux") || return 1
     validate_hostname "$hostname" && break
-    message "Hostname must be 1-63 letters, digits, or hyphens, and cannot begin or end with a hyphen."
+    message "Hostname must be 1-63 lowercase letters, digits, or hyphens, and cannot begin or end with a hyphen."
   done
 
   while :; do
-    username=$(input_value "Username:" "hermarchy") || return 1
+    username=$(input_value "Username:" "user") || return 1
     validate_username "$username" && break
     message "Username must start with a lowercase letter or underscore, contain only lowercase letters, digits, underscores, or hyphens, and cannot be root or nobody."
   done
@@ -93,7 +93,7 @@ main() {
   fi
 
   if ! "${DIALOG[@]}" --title "Confirm installation" --yesno \
-    "Install Hermarchy with these settings?\n\nDisk: $disk\nHostname: $hostname\nUser: $username\nFilesystem: ext4\nBootloader: systemd-boot\nTimezone: UTC" 18 72; then
+    "Install Arch Linux with these settings?\n\nDisk: $disk\nHostname: $hostname\nUser: $username\nFilesystem: ext4\nBootloader: systemd-boot\nTimezone: UTC" 18 72; then
     unset password
     return 0
   fi
@@ -105,6 +105,7 @@ main() {
   set +e
   /usr/local/bin/hermarchy-install \
     --disk "$disk" \
+    --confirm-disk "$disk" \
     --hostname "$hostname" \
     --username "$username" \
     --password-fd 3
@@ -114,7 +115,7 @@ main() {
 
   if (( status == 0 )); then
     if "${DIALOG[@]}" --title "Installation complete" --yesno \
-      "Hermarchy was installed successfully. Remove the installation media when the machine restarts.\n\nReboot now?" 12 72; then
+      "Arch Linux was installed successfully. Remove the installation media when the machine restarts.\n\nReboot now?" 12 72; then
       systemctl reboot
     fi
   else

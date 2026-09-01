@@ -1,0 +1,417 @@
+{
+  "commit": "f900196af8f293ec7e4ef452b368b9db8012d79f",
+  "entries": {
+    "airootfs/etc/hostname": {
+      "mode": "0644",
+      "sha256": "a9168a4fabfff3fe22da8b9a3e1cae17f3f46d9f37779ff365a33c4d16f0b99b",
+      "type": "file"
+    },
+    "airootfs/etc/locale.conf": {
+      "mode": "0644",
+      "sha256": "89dd29db91ea608d72b5b4d3d3f5816cc2d3c1dd730741dc41b20ce12f1c2b3b",
+      "type": "file"
+    },
+    "airootfs/etc/localtime": {
+      "mode": "0777",
+      "target": "/usr/share/zoneinfo/UTC",
+      "type": "symlink"
+    },
+    "airootfs/etc/mkinitcpio.conf.d/archiso.conf": {
+      "mode": "0644",
+      "sha256": "cd1d328d0b343719c5975729bf7c8c5a227542beb396574ff4adeac30381db0b",
+      "type": "file"
+    },
+    "airootfs/etc/mkinitcpio.d/linux.preset": {
+      "mode": "0644",
+      "sha256": "d839e18e7106ea77c377ffc91ece8ed538d48a9035f3527243ee9fb86c44e352",
+      "type": "file"
+    },
+    "airootfs/etc/modprobe.d/broadcom-wl.conf": {
+      "mode": "0644",
+      "sha256": "12821379472766c37e93bdf3caba774063d8d418912aeb76cee6746d646cf07f",
+      "type": "file"
+    },
+    "airootfs/etc/motd": {
+      "mode": "0644",
+      "sha256": "781fe968587572b30de5ac028d4648b43da5e298661bfd9fb23603cfd607d362",
+      "type": "file"
+    },
+    "airootfs/etc/pacman.d/hooks/uncomment-mirrors.hook": {
+      "mode": "0644",
+      "sha256": "4b5c728daf038b6c599d0a8e173e2e601044a8a631d0b7af6f5592863afed424",
+      "type": "file"
+    },
+    "airootfs/etc/pacman.d/hooks/zzzz99-remove-custom-hooks-from-airootfs.hook": {
+      "mode": "0644",
+      "sha256": "b00ec7d9c5ee91df896130ddb121e53a7ead5726e6216d71477b9ea42b830504",
+      "type": "file"
+    },
+    "airootfs/etc/passwd": {
+      "mode": "0644",
+      "sha256": "949fecf1090f8c5cccf8645cdfe3a803c0d15adec3d0869e0a44011af07f0756",
+      "type": "file"
+    },
+    "airootfs/etc/resolv.conf": {
+      "mode": "0777",
+      "target": "/run/systemd/resolve/stub-resolv.conf",
+      "type": "symlink"
+    },
+    "airootfs/etc/shadow": {
+      "mode": "0644",
+      "sha256": "8ce994663d7588143ad7ed4441b07f468f4f7d3590164dd73ddfa3ea307ece8e",
+      "type": "file"
+    },
+    "airootfs/etc/ssh/sshd_config.d/10-archiso.conf": {
+      "mode": "0644",
+      "sha256": "e21d83ccc2acb89e444802d61a2171833658b6eacb65e80ea4bbbad42a9760a6",
+      "type": "file"
+    },
+    "airootfs/etc/systemd/journald.conf.d/volatile-storage.conf": {
+      "mode": "0644",
+      "sha256": "c0c9a711f7554fdd02650409b098fc0636b8f3f574f03d927c6df84f5ec82a7f",
+      "type": "file"
+    },
+    "airootfs/etc/systemd/logind.conf.d/do-not-suspend.conf": {
+      "mode": "0644",
+      "sha256": "17ea3cafdfa2575a94d36e7328148bc5da28bb4833e16bc4a474f8dcdc2b73df",
+      "type": "file"
+    },
+    "airootfs/etc/systemd/network/20-ethernet.network": {
+      "mode": "0644",
+      "sha256": "4da01b7031f3528ba64c0b0f1461e3d70da06d8c475a752b711cbdb2eaf0c34e",
+      "type": "file"
+    },
+    "airootfs/etc/systemd/network/20-wlan.network": {
+      "mode": "0644",
+      "sha256": "f345a066b7ab2ee4526a8b3354cc21ea114bdc877c112aa1fe35ffed02eea984",
+      "type": "file"
+    },
+    "airootfs/etc/systemd/network/20-wwan.network": {
+      "mode": "0644",
+      "sha256": "860f7678e5f5daa20e7dbb8b947d63b086f190ce8895678576fd0922d53d8924",
+      "type": "file"
+    },
+    "airootfs/etc/systemd/networkd.conf.d/ipv6-privacy-extensions.conf": {
+      "mode": "0644",
+      "sha256": "d88fd1c481579aa7d0ffc12ef39d77cc474c33bd465eda5515cd114025597dcd",
+      "type": "file"
+    },
+    "airootfs/etc/systemd/resolved.conf.d/archiso.conf": {
+      "mode": "0644",
+      "sha256": "5a9c2b59354e526e4c5390505c7037eecefd96b5753826ce265d6062a0554eb3",
+      "type": "file"
+    },
+    "airootfs/etc/systemd/system-generators/systemd-gpt-auto-generator": {
+      "mode": "0777",
+      "target": "/dev/null",
+      "type": "symlink"
+    },
+    "airootfs/etc/systemd/system/choose-mirror.service": {
+      "mode": "0644",
+      "sha256": "0ab103ad2490b903eda1ca4806b18a54f79ca608ad64dc8c208a4d9b4bec3e51",
+      "type": "file"
+    },
+    "airootfs/etc/systemd/system/cloud-init.target.wants/cloud-config.service": {
+      "mode": "0777",
+      "target": "/usr/lib/systemd/system/cloud-config.service",
+      "type": "symlink"
+    },
+    "airootfs/etc/systemd/system/cloud-init.target.wants/cloud-final.service": {
+      "mode": "0777",
+      "target": "/usr/lib/systemd/system/cloud-final.service",
+      "type": "symlink"
+    },
+    "airootfs/etc/systemd/system/cloud-init.target.wants/cloud-init-local.service": {
+      "mode": "0777",
+      "target": "/usr/lib/systemd/system/cloud-init-local.service",
+      "type": "symlink"
+    },
+    "airootfs/etc/systemd/system/cloud-init.target.wants/cloud-init-main.service": {
+      "mode": "0777",
+      "target": "/usr/lib/systemd/system/cloud-init-main.service",
+      "type": "symlink"
+    },
+    "airootfs/etc/systemd/system/cloud-init.target.wants/cloud-init-network.service": {
+      "mode": "0777",
+      "target": "/usr/lib/systemd/system/cloud-init-network.service",
+      "type": "symlink"
+    },
+    "airootfs/etc/systemd/system/dbus-org.freedesktop.ModemManager1.service": {
+      "mode": "0777",
+      "target": "/usr/lib/systemd/system/ModemManager.service",
+      "type": "symlink"
+    },
+    "airootfs/etc/systemd/system/dbus-org.freedesktop.network1.service": {
+      "mode": "0777",
+      "target": "/usr/lib/systemd/system/systemd-networkd.service",
+      "type": "symlink"
+    },
+    "airootfs/etc/systemd/system/dbus-org.freedesktop.resolve1.service": {
+      "mode": "0777",
+      "target": "/usr/lib/systemd/system/systemd-resolved.service",
+      "type": "symlink"
+    },
+    "airootfs/etc/systemd/system/dbus-org.freedesktop.timesync1.service": {
+      "mode": "0777",
+      "target": "/usr/lib/systemd/system/systemd-timesyncd.service",
+      "type": "symlink"
+    },
+    "airootfs/etc/systemd/system/etc-pacman.d-gnupg.mount": {
+      "mode": "0644",
+      "sha256": "c9df1f5568fb2a6cfb3e84966b2bb2d1994eb7c481ef535289bb94bde8223f2c",
+      "type": "file"
+    },
+    "airootfs/etc/systemd/system/getty@tty1.service.d/autologin.conf": {
+      "mode": "0644",
+      "sha256": "91c35046e7a9d5dc73e0decef359e110d952cb694aa458df8ab37ed55e2ba21d",
+      "type": "file"
+    },
+    "airootfs/etc/systemd/system/livecd-alsa-unmuter.service": {
+      "mode": "0644",
+      "sha256": "85baf1d733c5fb59a22f0f824812e3222e006417a3f834204a46226695423580",
+      "type": "file"
+    },
+    "airootfs/etc/systemd/system/livecd-talk.service": {
+      "mode": "0644",
+      "sha256": "be476bffaf29d7190c0c9b02ca4022fdb5828854131a92ad970f62b004547945",
+      "type": "file"
+    },
+    "airootfs/etc/systemd/system/multi-user.target.wants/ModemManager.service": {
+      "mode": "0777",
+      "target": "/usr/lib/systemd/system/ModemManager.service",
+      "type": "symlink"
+    },
+    "airootfs/etc/systemd/system/multi-user.target.wants/choose-mirror.service": {
+      "mode": "0777",
+      "target": "../choose-mirror.service",
+      "type": "symlink"
+    },
+    "airootfs/etc/systemd/system/multi-user.target.wants/hv_fcopy_daemon.service": {
+      "mode": "0777",
+      "target": "/usr/lib/systemd/system/hv_fcopy_daemon.service",
+      "type": "symlink"
+    },
+    "airootfs/etc/systemd/system/multi-user.target.wants/hv_kvp_daemon.service": {
+      "mode": "0777",
+      "target": "/usr/lib/systemd/system/hv_kvp_daemon.service",
+      "type": "symlink"
+    },
+    "airootfs/etc/systemd/system/multi-user.target.wants/hv_vss_daemon.service": {
+      "mode": "0777",
+      "target": "/usr/lib/systemd/system/hv_vss_daemon.service",
+      "type": "symlink"
+    },
+    "airootfs/etc/systemd/system/multi-user.target.wants/iwd.service": {
+      "mode": "0777",
+      "target": "/usr/lib/systemd/system/iwd.service",
+      "type": "symlink"
+    },
+    "airootfs/etc/systemd/system/multi-user.target.wants/livecd-talk.service": {
+      "mode": "0777",
+      "target": "/etc/systemd/system/livecd-talk.service",
+      "type": "symlink"
+    },
+    "airootfs/etc/systemd/system/multi-user.target.wants/pacman-init.service": {
+      "mode": "0777",
+      "target": "../pacman-init.service",
+      "type": "symlink"
+    },
+    "airootfs/etc/systemd/system/multi-user.target.wants/sshd.service": {
+      "mode": "0777",
+      "target": "/usr/lib/systemd/system/sshd.service",
+      "type": "symlink"
+    },
+    "airootfs/etc/systemd/system/multi-user.target.wants/systemd-networkd.service": {
+      "mode": "0777",
+      "target": "/usr/lib/systemd/system/systemd-networkd.service",
+      "type": "symlink"
+    },
+    "airootfs/etc/systemd/system/multi-user.target.wants/systemd-resolved.service": {
+      "mode": "0777",
+      "target": "/usr/lib/systemd/system/systemd-resolved.service",
+      "type": "symlink"
+    },
+    "airootfs/etc/systemd/system/multi-user.target.wants/vboxservice.service": {
+      "mode": "0777",
+      "target": "/usr/lib/systemd/system/vboxservice.service",
+      "type": "symlink"
+    },
+    "airootfs/etc/systemd/system/multi-user.target.wants/vmtoolsd.service": {
+      "mode": "0777",
+      "target": "/usr/lib/systemd/system/vmtoolsd.service",
+      "type": "symlink"
+    },
+    "airootfs/etc/systemd/system/multi-user.target.wants/vmware-vmblock-fuse.service": {
+      "mode": "0777",
+      "target": "/usr/lib/systemd/system/vmware-vmblock-fuse.service",
+      "type": "symlink"
+    },
+    "airootfs/etc/systemd/system/network-online.target.wants/systemd-networkd-wait-online.service": {
+      "mode": "0777",
+      "target": "/usr/lib/systemd/system/systemd-networkd-wait-online.service",
+      "type": "symlink"
+    },
+    "airootfs/etc/systemd/system/pacman-init.service": {
+      "mode": "0644",
+      "sha256": "a5407465b6b533bf7608bede2fa0035223b9aa659afca4223d40bca952cd6fd4",
+      "type": "file"
+    },
+    "airootfs/etc/systemd/system/sockets.target.wants/pcscd.socket": {
+      "mode": "0777",
+      "target": "/usr/lib/systemd/system/pcscd.socket",
+      "type": "symlink"
+    },
+    "airootfs/etc/systemd/system/sockets.target.wants/systemd-networkd.socket": {
+      "mode": "0777",
+      "target": "/usr/lib/systemd/system/systemd-networkd.socket",
+      "type": "symlink"
+    },
+    "airootfs/etc/systemd/system/sound.target.wants/livecd-alsa-unmuter.service": {
+      "mode": "0777",
+      "target": "../livecd-alsa-unmuter.service",
+      "type": "symlink"
+    },
+    "airootfs/etc/systemd/system/sysinit.target.wants/systemd-time-wait-sync.service": {
+      "mode": "0777",
+      "target": "/usr/lib/systemd/system/systemd-time-wait-sync.service",
+      "type": "symlink"
+    },
+    "airootfs/etc/systemd/system/sysinit.target.wants/systemd-timesyncd.service": {
+      "mode": "0777",
+      "target": "/usr/lib/systemd/system/systemd-timesyncd.service",
+      "type": "symlink"
+    },
+    "airootfs/etc/systemd/system/systemd-networkd-wait-online.service.d/wait-for-only-one-interface.conf": {
+      "mode": "0644",
+      "sha256": "3832d89abb32080a190c5b902c64fa7cdf219eafa921523f4e478712742a7df6",
+      "type": "file"
+    },
+    "airootfs/root/.automated_script.sh": {
+      "mode": "0755",
+      "sha256": "06bf206fce0ca63b789969f13e16ea8346c2af9dd39e6e0e00fbd6322ead82af",
+      "type": "file"
+    },
+    "airootfs/root/.gnupg/scdaemon.conf": {
+      "mode": "0644",
+      "sha256": "c89d4e5c4e81d50cc7d87ad9476d76a86cbba0d8345c25c0d76e27c00a46a0c4",
+      "type": "file"
+    },
+    "airootfs/root/.zlogin": {
+      "mode": "0644",
+      "sha256": "d22d3216fff1f02d40cbd613ca647ad56a878cd7b3bfa36d72a635b2541d862e",
+      "type": "file"
+    },
+    "airootfs/usr/local/bin/Installation_guide": {
+      "mode": "0755",
+      "sha256": "32e73de7252d4d5e3d9871dba769ba55017cd2bcdcd4859cc836b718e4d10d94",
+      "type": "file"
+    },
+    "airootfs/usr/local/bin/choose-mirror": {
+      "mode": "0755",
+      "sha256": "14c36f0a6639ae71179a5e8358bec70a1d4a4cb6083c500e0afb17bdf1fce50c",
+      "type": "file"
+    },
+    "airootfs/usr/local/bin/livecd-sound": {
+      "mode": "0755",
+      "sha256": "19804f5fe38d94a5c54bc2774ce4228401e8b9a54b5411138ab4719214960b11",
+      "type": "file"
+    },
+    "airootfs/usr/local/share/livecd-sound/asound.conf.in": {
+      "mode": "0644",
+      "sha256": "0d04d794d27ea613299fb601867681580a7935dc5c78267f892136efb9804948",
+      "type": "file"
+    },
+    "bootstrap_packages": {
+      "mode": "0644",
+      "sha256": "9e602440a68d69d11908d5f953d96ba3a8e4eb2ec36a47c87d977a70d1bce140",
+      "type": "file"
+    },
+    "efiboot/loader/entries/01-archiso-linux.conf": {
+      "mode": "0644",
+      "sha256": "20c9b179357095ca930a098864a6726b49e7db8d112eb1f15075d92bebc07d48",
+      "type": "file"
+    },
+    "efiboot/loader/entries/02-archiso-speech-linux.conf": {
+      "mode": "0644",
+      "sha256": "33e0cf2a19401f42e2fc93923c7b5fe3623a0271ba2233e14100061d64192448",
+      "type": "file"
+    },
+    "efiboot/loader/entries/03-archiso-memtest86+x64.conf": {
+      "mode": "0644",
+      "sha256": "83fe499758a0b93e381977566a436d58b1bd8d430ecbfe829fa880a80b2804eb",
+      "type": "file"
+    },
+    "efiboot/loader/loader.conf": {
+      "mode": "0644",
+      "sha256": "3a445295e0f99c97fdde0e0cd1300260a4af380e7d1c7e5ea93ae0c96d2b03b1",
+      "type": "file"
+    },
+    "grub/grub.cfg": {
+      "mode": "0644",
+      "sha256": "6aae08ff009e58b72c7025f469bd66043949d9692355ef5d0daf23df1805a97d",
+      "type": "file"
+    },
+    "grub/loopback.cfg": {
+      "mode": "0644",
+      "sha256": "9e9e4447f09017a192a041433dc8f5b4ffe27f382c9d72f164c603a0c2d20efa",
+      "type": "file"
+    },
+    "packages.x86_64": {
+      "mode": "0644",
+      "sha256": "441b9d2a8e0b2968a6b8f0bcb618ea09cb75706995dfc81f052a83c6c060c717",
+      "type": "file"
+    },
+    "pacman.conf": {
+      "mode": "0644",
+      "sha256": "a250b3998460e0f2c39e8cc458382171b372b57ace91f36d2eae50d124c0c7fc",
+      "type": "file"
+    },
+    "profiledef.sh": {
+      "mode": "0644",
+      "sha256": "10e8bd1b3de241314b566042f71e18fb6d2794f3878045d532732bdc4b68c8ed",
+      "type": "file"
+    },
+    "syslinux/archiso_head.cfg": {
+      "mode": "0644",
+      "sha256": "b003aaec419729716a773c161e70dff22231f1a00ff495ac1119bcfb742c22c6",
+      "type": "file"
+    },
+    "syslinux/archiso_pxe-linux.cfg": {
+      "mode": "0644",
+      "sha256": "d01967b21afecd2accb6fad770b660bfe2b13d835baa61dd1e9152b1afc8e6c7",
+      "type": "file"
+    },
+    "syslinux/archiso_pxe.cfg": {
+      "mode": "0644",
+      "sha256": "62feb6fcf309bd126df912cbeec80391da6cc92e45946c8f74b8c53f668dbe2c",
+      "type": "file"
+    },
+    "syslinux/archiso_sys-linux.cfg": {
+      "mode": "0644",
+      "sha256": "18eb05bb7119035ce410e087cca6f43f4d507ba9327896dc8cb4c0da3d000d14",
+      "type": "file"
+    },
+    "syslinux/archiso_sys.cfg": {
+      "mode": "0644",
+      "sha256": "83157f584f9e0bf9f467499677798c36ca24e35f5bdef2f104a9d4cc0f89f75a",
+      "type": "file"
+    },
+    "syslinux/archiso_tail.cfg": {
+      "mode": "0644",
+      "sha256": "dc55a881c29021dd7883da8bd09eca5c505d2589c22d4b58f9f728f8bb4e772d",
+      "type": "file"
+    },
+    "syslinux/splash.png": {
+      "mode": "0644",
+      "sha256": "efedc11aeaaf6743dccd68df40f5f7cb71fe0efea9a4f24b8ce8b6e3ca73f686",
+      "type": "file"
+    },
+    "syslinux/syslinux.cfg": {
+      "mode": "0644",
+      "sha256": "51d33be8381fdd5770868934679f6307e8ce70d24d6d06befda2cec6c9292e65",
+      "type": "file"
+    }
+  },
+  "profile": "configs/releng",
+  "repository": "https://gitlab.archlinux.org/archlinux/archiso.git"
+}
