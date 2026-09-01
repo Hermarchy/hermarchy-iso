@@ -1,6 +1,6 @@
 # Hermarchy ISO
 
-Development tooling for the Hermarchy installation ISO. The current milestone is a basic x86_64 ArchISO that boots directly into a custom Hermarchy installer. It does not invoke `archinstall`.
+Development tooling for the Hermarchy installation ISO. The current milestone is a functional console-based x86_64 Arch system that boots directly into a custom Hermarchy installer. It retains the broad hardware and recovery capabilities of ArchISO rather than becoming a VM-only appliance. A desktop environment is the next milestone. The installer does not invoke `archinstall`.
 
 ## Development policy
 
@@ -20,9 +20,12 @@ Development tooling for the Hermarchy installation ISO. The current milestone is
 - systemd-boot
 - One user with wheel/sudo access
 - NetworkManager enabled on the target
+- CPU-appropriate Intel or AMD microcode installed on the target and packed into both mkinitcpio images for early loading
 - UTC and `en_US.UTF-8`
 
 Not yet supported: encryption, dual boot, partition preservation, offline installation, Secure Boot, custom Hermarchy packages, RCs, or production releases.
+
+See [`docs/milestone-1.md`](docs/milestone-1.md) for the console-foundation contract and acceptance gates.
 
 ## Repository layout
 
@@ -42,9 +45,12 @@ The base profile was imported from ArchISO commit `f900196af8f293ec7e4ef452b368b
 
 ```bash
 ./test/all
+./bin/resolve-profile-packages
 ```
 
-Tests validate shell syntax, shellcheck, input validation, disk filtering, NVMe-style partition discovery, profile invariants, manual-only workflow triggers, and R2 replacement/rollback behavior. They do not touch block devices or create an ISO.
+`./test/all` validates shell syntax, shellcheck, input validation, CPU microcode selection and boot-entry generation, disk filtering, NVMe-style partition discovery, profile invariants, resolver container policy, manual-only workflow triggers, and R2 replacement/rollback behavior. It does not touch block devices, access real R2, or create an ISO.
+
+`./bin/resolve-profile-packages` uses the same digest-pinned Arch container and `profile/pacman.conf` as the build to resolve the complete live package list. It also rejects Broadcom DKMS revisions known not to build against the current Arch kernel. It requires network and Docker access, but it is unprivileged and does not invoke `mkarchiso`. Run it before requesting a dev ISO so removed, inconsistent, or known-incompatible Arch packages fail early.
 
 ## Build locally
 

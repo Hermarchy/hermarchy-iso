@@ -27,6 +27,11 @@ required_engine = (
     'findmnt --verify --tab-file',
     'install -m 0600 "$LOG_FILE"',
     '--output PATH,PARTN,PKNAME,PARTTYPE',
+    'target_packages+=("$microcode_package")',
+    'systemd-detect-virt --quiet',
+    'mkinitcpio -P',
+    'lsinitcpio --early',
+    'write_systemd_boot_entry',
 )
 for required in required_engine:
     if required not in engine:
@@ -38,6 +43,8 @@ required_common = (
     'swapon --show=NAME',
     'disk contains stacked block devices',
     'partition_path_from_json',
+    'microcode_package_for_vendor',
+    'microcode_blob_for_vendor',
 )
 for required in required_common:
     if required not in common:

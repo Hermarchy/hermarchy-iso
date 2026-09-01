@@ -7,7 +7,7 @@ bcachefs-tools
 bind
 bolt
 brltty
-broadcom-wl
+broadcom-wl-dkms
 btrfs-progs
 clonezilla
 cloud-init
@@ -57,6 +57,7 @@ linux
 linux-atm
 linux-firmware
 linux-firmware-marvell
+linux-headers
 livecd-sounds
 lsscsi
 lvm2

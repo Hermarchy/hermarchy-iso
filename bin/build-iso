@@ -7,7 +7,8 @@ PROFILE="$ROOT/profile"
 RELEASE="$ROOT/release"
 WORK="$ROOT/.work"
 STAGED_PROFILE="$WORK/profile"
-readonly ARCHISO_BUILD_IMAGE='archlinux@sha256:b860afd5823683f7ea389ba5f00d812f4fe55f6f286dea329d2abeefa535e309'
+# shellcheck source=bin/lib/archiso-container.sh
+source "$ROOT/bin/lib/archiso-container.sh"
 
 usage() {
   printf 'Usage: %s [--clean]\n' "$0"
@@ -23,7 +24,7 @@ while (( $# > 0 )); do
   shift
 done
 
-command -v docker >/dev/null || { echo 'docker is required' >&2; exit 1; }
+select_archiso_container
 [[ -z $(git -C "$ROOT" status --porcelain --untracked-files=normal) ]] || {
   echo 'refusing to build from an uncommitted checkout' >&2
   exit 1
@@ -47,14 +48,9 @@ iso_commit=$commit
 built_at=$built_at
 EOF
 
-container=(docker)
-if ! docker info >/dev/null 2>&1; then
-  container=(sudo docker)
-fi
-
 # HOST_UID/HOST_GID expand inside the container shell, not in this shell.
 # shellcheck disable=SC2016
-"${container[@]}" run --rm --privileged \
+"${ARCHISO_CONTAINER[@]}" run --rm --privileged \
   -e SOURCE_DATE_EPOCH="$source_epoch" \
   -e HOST_UID="$(id -u)" \
   -e HOST_GID="$(id -g)" \

@@ -36,7 +36,7 @@ trap cleanup EXIT
 
 require_commands() {
   local command
-  for command in arch-chroot blkid bootctl findmnt flock genfstab install jq lsblk mkfs.ext4 mkfs.fat mount mountpoint od pacstrap partprobe readlink sgdisk swapon systemctl udevadm umount uname wipefs; do
+  for command in arch-chroot blkid bootctl findmnt flock genfstab install jq lsblk mkfs.ext4 mkfs.fat mount mountpoint od pacstrap partprobe readlink sgdisk swapon systemctl systemd-detect-virt udevadm umount uname wipefs; do
     command -v "$command" >/dev/null || fail "required command is missing: $command"
   done
 }
@@ -50,7 +50,9 @@ verify_mount_source() {
 
 install_system() {
   local disk=$1 hostname=$2 username=$3 password=$4
-  local disk_json disk_kname esp root root_uuid fstab_tmp
+  local disk_json disk_kname esp root root_uuid fstab_tmp cpu_vendor microcode_package microcode_blob initramfs initramfs_early boot_file
+  local -a target_packages=(base linux linux-firmware mkinitcpio networkmanager sudo)
+  local -a boot_files
 
   [[ $EUID == 0 ]] || fail "installer must run as root"
   validate_uefi_environment
@@ -91,9 +93,33 @@ install_system() {
   verify_mount_source "$TARGET" "$root"
   verify_mount_source "$TARGET/boot" "$esp"
 
+  cpu_vendor=''
+  microcode_package=''
+  microcode_blob=''
+  if systemd-detect-virt --quiet; then
+    log 'Virtual machine detected; CPU microcode remains the host responsibility'
+  else
+    cpu_vendor=$(cpu_vendor_from_cpuinfo)
+    microcode_package=$(microcode_package_for_vendor "$cpu_vendor")
+    microcode_blob=$(microcode_blob_for_vendor "$cpu_vendor")
+    if [[ -n $microcode_package ]]; then
+      target_packages+=("$microcode_package")
+      log "Installing $microcode_package for CPU vendor $cpu_vendor"
+    else
+      log "No Intel or AMD CPU microcode package selected for vendor ${cpu_vendor:-unknown}"
+    fi
+  fi
+
   log "Installing the base Arch system"
-  pacstrap -K "$TARGET" \
-    base linux linux-firmware networkmanager sudo
+  pacstrap -K "$TARGET" "${target_packages[@]}"
+  arch-chroot "$TARGET" mkinitcpio -P
+  if [[ -n $microcode_blob ]]; then
+    for initramfs in /boot/initramfs-linux.img /boot/initramfs-linux-fallback.img; do
+      initramfs_early=$(arch-chroot "$TARGET" lsinitcpio --early "$initramfs")
+      [[ $initramfs_early == *"$microcode_blob"* ]] ||
+        fail "$initramfs does not contain early CPU microcode: $microcode_blob"
+    done
+  fi
 
   fstab_tmp="$TARGET/etc/fstab.hermarchy.tmp"
   genfstab -U "$TARGET" >"$fstab_tmp"
@@ -142,25 +168,21 @@ timeout 3
 console-mode keep
 editor no
 EOF
-  cat >"$TARGET/boot/loader/entries/hermarchy.conf" <<EOF
-title Hermarchy
-linux /vmlinuz-linux
-initrd /initramfs-linux.img
-options root=UUID=$root_uuid rw
-EOF
-  cat >"$TARGET/boot/loader/entries/hermarchy-fallback.conf" <<EOF
-title Hermarchy (fallback initramfs)
-linux /vmlinuz-linux
-initrd /initramfs-linux-fallback.img
-options root=UUID=$root_uuid rw
-EOF
+  write_systemd_boot_entry \
+    "$TARGET/boot/loader/entries/hermarchy.conf" \
+    'Hermarchy' /initramfs-linux.img "$root_uuid"
+  write_systemd_boot_entry \
+    "$TARGET/boot/loader/entries/hermarchy-fallback.conf" \
+    'Hermarchy (fallback initramfs)' /initramfs-linux-fallback.img "$root_uuid"
 
-  for boot_file in \
-    "$TARGET/boot/EFI/systemd/systemd-bootx64.efi" \
-    "$TARGET/boot/EFI/BOOT/BOOTX64.EFI" \
-    "$TARGET/boot/vmlinuz-linux" \
-    "$TARGET/boot/initramfs-linux.img" \
-    "$TARGET/boot/initramfs-linux-fallback.img"; do
+  boot_files=(
+    "$TARGET/boot/EFI/systemd/systemd-bootx64.efi"
+    "$TARGET/boot/EFI/BOOT/BOOTX64.EFI"
+    "$TARGET/boot/vmlinuz-linux"
+    "$TARGET/boot/initramfs-linux.img"
+    "$TARGET/boot/initramfs-linux-fallback.img"
+  )
+  for boot_file in "${boot_files[@]}"; do
     [[ -f $boot_file ]] || fail "required boot file is missing: ${boot_file#"$TARGET"}"
   done
   arch-chroot -S "$TARGET" bootctl --esp-path=/boot is-installed >/dev/null

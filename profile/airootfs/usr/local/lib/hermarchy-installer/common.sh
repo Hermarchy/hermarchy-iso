@@ -28,6 +28,44 @@ validate_username() {
   esac
 }
 
+cpu_vendor_from_cpuinfo() {
+  local cpuinfo=${1:-/proc/cpuinfo} key value
+  [[ -r $cpuinfo ]] || return 0
+
+  while IFS=: read -r key value; do
+    key=${key//[[:space:]]/}
+    [[ $key == vendor_id ]] || continue
+    value=${value#"${value%%[![:space:]]*}"}
+    value=${value%"${value##*[![:space:]]}"}
+    printf '%s\n' "$value"
+    return 0
+  done <"$cpuinfo"
+}
+
+microcode_package_for_vendor() {
+  case ${1:-} in
+    GenuineIntel) printf '%s\n' intel-ucode ;;
+    AuthenticAMD) printf '%s\n' amd-ucode ;;
+  esac
+}
+
+microcode_blob_for_vendor() {
+  case ${1:-} in
+    GenuineIntel) printf '%s\n' kernel/x86/microcode/GenuineIntel.bin ;;
+    AuthenticAMD) printf '%s\n' kernel/x86/microcode/AuthenticAMD.bin ;;
+  esac
+}
+
+write_systemd_boot_entry() {
+  local destination=$1 title=$2 initramfs=$3 root_uuid=$4
+  {
+    printf 'title %s\n' "$title"
+    printf 'linux /vmlinuz-linux\n'
+    printf 'initrd %s\n' "$initramfs"
+    printf 'options root=UUID=%s rw\n' "$root_uuid"
+  } >"$destination"
+}
+
 validate_uefi_environment() {
   local platform_size efivar_options secure_boot_var secure_boot
 

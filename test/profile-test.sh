@@ -13,13 +13,22 @@ PROFILE="$ROOT/profile"
 
 if python3 - "$PROFILE/packages.x86_64" <<'PY'
 import sys
-pkgs={line.strip() for line in open(sys.argv[1]) if line.strip() and not line.startswith('#')}
-required={'arch-install-scripts','curl','dialog','dosfstools','e2fsprogs','efibootmgr','gptfdisk','jq'}
+package_lines=[line.strip() for line in open(sys.argv[1]) if line.strip() and not line.startswith('#')]
+if package_lines != sorted(set(package_lines)):
+    raise SystemExit('live package list must be sorted and contain no duplicates')
+pkgs=set(package_lines)
+required={
+    'amd-ucode', 'arch-install-scripts', 'broadcom-wl-dkms', 'curl', 'dialog',
+    'dosfstools', 'e2fsprogs', 'efibootmgr', 'gptfdisk', 'intel-ucode', 'jq',
+    'linux-headers',
+}
 missing=required-pkgs
 if missing:
     raise SystemExit(f'missing live packages: {sorted(missing)}')
 if 'archinstall' in pkgs:
     raise SystemExit('archinstall must not be present')
+if 'broadcom-wl' in pkgs:
+    raise SystemExit('obsolete broadcom-wl package must not be present')
 PY
 then :; else exit 1; fi
 
@@ -35,7 +44,7 @@ if 'bios.syslinux' in text or 'uefi.grub' in text:
     raise SystemExit('unsupported boot modes are enabled')
 PY
 
-python3 - "$ROOT/bin/build-iso" <<'PY'
+python3 - "$ROOT/bin/lib/archiso-container.sh" <<'PY'
 import re, sys
 text=open(sys.argv[1]).read()
 if not re.search(r"archlinux@sha256:[0-9a-f]{64}", text):

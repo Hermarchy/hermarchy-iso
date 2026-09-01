@@ -21,6 +21,7 @@ run 'shell syntax' "$ROOT/test/syntax-test.sh"
 run 'installer helpers' "$ROOT/test/installer-test.sh"
 run 'installer and publisher security invariants' "$ROOT/test/security-test.sh"
 run 'ArchISO profile' "$ROOT/test/profile-test.sh"
+run 'profile package resolver policy' "$ROOT/test/resolver-test.sh"
 run 'R2 replacement transaction' "$ROOT/test/publish-test.sh"
 run 'manual-only workflow' "$ROOT/test/workflow-test.sh"
 

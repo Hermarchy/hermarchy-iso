@@ -50,6 +50,9 @@ jobs:
       - name: Run tests
         run: ./test/all
 
+      - name: Resolve ArchISO profile packages
+        run: ./bin/resolve-profile-packages
+
       - name: Build ISO
         run: ./bin/build-iso --clean
 

@@ -12,6 +12,9 @@ assert_success() { "$@" >/dev/null || fail_test "$1 should succeed"; }
 assert_failure() { if "$@" >/dev/null 2>&1; then fail_test "$1 should fail"; fi; }
 assert_equal() { [[ $1 == "$2" ]] || fail_test "$3: expected '$2', got '$1'"; }
 
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+
 assert_success validate_hostname hermarchy
 assert_success validate_hostname hermarchy-dev
 assert_failure validate_hostname '-bad'
@@ -25,6 +28,32 @@ assert_failure validate_username Root
 assert_failure validate_username root
 assert_failure validate_username 'bad.name'
 pass 'username validation'
+
+cat >"$TMP/cpuinfo-intel" <<'EOF'
+processor : 0
+vendor_id : GenuineIntel
+EOF
+cat >"$TMP/cpuinfo-amd" <<'EOF'
+processor : 0
+vendor_id : AuthenticAMD
+EOF
+assert_equal "$(cpu_vendor_from_cpuinfo "$TMP/cpuinfo-intel")" GenuineIntel 'Intel CPU vendor detection'
+assert_equal "$(cpu_vendor_from_cpuinfo "$TMP/cpuinfo-amd")" AuthenticAMD 'AMD CPU vendor detection'
+assert_equal "$(cpu_vendor_from_cpuinfo "$TMP/missing")" '' 'missing CPU vendor data'
+assert_equal "$(microcode_package_for_vendor GenuineIntel)" intel-ucode 'Intel microcode package'
+assert_equal "$(microcode_package_for_vendor AuthenticAMD)" amd-ucode 'AMD microcode package'
+assert_equal "$(microcode_package_for_vendor UnknownVendor)" '' 'unknown CPU microcode package'
+assert_equal "$(microcode_blob_for_vendor GenuineIntel)" kernel/x86/microcode/GenuineIntel.bin 'Intel microcode blob'
+assert_equal "$(microcode_blob_for_vendor AuthenticAMD)" kernel/x86/microcode/AuthenticAMD.bin 'AMD microcode blob'
+assert_equal "$(microcode_blob_for_vendor UnknownVendor)" '' 'unknown CPU microcode blob'
+pass 'CPU microcode selection'
+
+write_systemd_boot_entry \
+  "$TMP/hermarchy.conf" 'Hermarchy' /initramfs-linux.img \
+  01234567-89ab-cdef-0123-456789abcdef
+expected_entry=$'title Hermarchy\nlinux /vmlinuz-linux\ninitrd /initramfs-linux.img\noptions root=UUID=01234567-89ab-cdef-0123-456789abcdef rw'
+assert_equal "$(<"$TMP/hermarchy.conf")" "$expected_entry" 'combined-microcode boot entry'
+pass 'systemd-boot entry generation'
 
 fixture='{
   "blockdevices": [

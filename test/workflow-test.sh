@@ -17,6 +17,7 @@ for required in (
     'environment: dev-iso',
     'cancel-in-progress: false',
     'R2_ACCESS_KEY_ID',
+    './bin/resolve-profile-packages',
     './bin/publish-dev-iso',
     'Verify public download set',
     "if: github.ref == 'refs/heads/dev'",
