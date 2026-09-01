@@ -55,6 +55,11 @@ expected_entry=$'title Hermarchy\nlinux /vmlinuz-linux\ninitrd /initramfs-linux.
 assert_equal "$(<"$TMP/hermarchy.conf")" "$expected_entry" 'combined-microcode boot entry'
 pass 'systemd-boot entry generation'
 
+write_mkinitcpio_preset "$TMP/linux.preset"
+expected_preset=$'# Hermarchy target preset: retain an all-modules fallback image.\nALL_kver="/boot/vmlinuz-linux"\nPRESETS=(\'default\' \'fallback\')\ndefault_image="/boot/initramfs-linux.img"\nfallback_image="/boot/initramfs-linux-fallback.img"\nfallback_options="-S autodetect"'
+assert_equal "$(<"$TMP/linux.preset")" "$expected_preset" 'target mkinitcpio preset'
+pass 'fallback initramfs preset generation'
+
 fixture='{
   "blockdevices": [
     {"path":"/dev/vda","type":"disk","size":42949672960,"model":"QEMU HARDDISK","rm":false,"ro":false,"mountpoints":[null],"children":[]},
@@ -76,6 +81,8 @@ pass 'disk display metadata is sanitized'
 common_source=$(<"$ROOT/profile/airootfs/usr/local/lib/hermarchy-installer/common.sh")
 removable_check="lsblk -dnro RM \"\$disk\""
 [[ $common_source == *"$removable_check"* ]] || fail_test 'authoritative disk validation must reject removable disks'
+[[ $common_source == *'lsblk --tree --json --bytes --paths'* ]] || fail_test 'disk enumeration must request nested lsblk JSON'
+[[ $common_source == *'lsblk --tree --json --paths --output PATH,TYPE'* ]] || fail_test 'authoritative descendant validation must request nested lsblk JSON'
 pass 'authoritative disk validation rejects removable media'
 
 esp_guid=c12a7328-f81f-11d2-ba4b-00a0c93ec93b

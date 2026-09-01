@@ -12,7 +12,7 @@ Development tooling for the Hermarchy installation ISO. The current milestone is
 
 ## Current installer scope
 
-- x86_64 UEFI-only live ISO
+- x86_64 UEFI-only live ISO; physical installation currently supports Intel and AMD CPUs
 - UEFI-only installed target
 - Online packages from official Arch repositories
 - Whole-disk destructive repartition and format (not forensic secure erase)
@@ -22,6 +22,8 @@ Development tooling for the Hermarchy installation ISO. The current milestone is
 - NetworkManager enabled on the target
 - CPU-appropriate Intel or AMD microcode installed on the target and packed into both mkinitcpio images for early loading
 - UTC and `en_US.UTF-8`
+
+The live ISO carries `broadcom-wl-dkms` as a manual proprietary-driver fallback while keeping the in-kernel Broadcom drivers available by default. Milestone 1 target installations use the standard in-kernel drivers and `linux-firmware`; automatic installation and selection of proprietary `wl` on the target is not yet supported.
 
 Not yet supported: encryption, dual boot, partition preservation, offline installation, Secure Boot, custom Hermarchy packages, RCs, or production releases.
 

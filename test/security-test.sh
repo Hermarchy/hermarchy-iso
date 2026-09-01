@@ -32,6 +32,8 @@ required_engine = (
     'mkinitcpio -P',
     'lsinitcpio --early',
     'write_systemd_boot_entry',
+    'write_mkinitcpio_preset',
+    'unsupported physical CPU vendor',
 )
 for required in required_engine:
     if required not in engine:
@@ -45,6 +47,8 @@ required_common = (
     'partition_path_from_json',
     'microcode_package_for_vendor',
     'microcode_blob_for_vendor',
+    "PRESETS=('default' 'fallback')",
+    'lsblk --tree --json',
 )
 for required in required_common:
     if required not in common:

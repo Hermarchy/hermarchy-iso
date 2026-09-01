@@ -106,12 +106,13 @@ install_system() {
       target_packages+=("$microcode_package")
       log "Installing $microcode_package for CPU vendor $cpu_vendor"
     else
-      log "No Intel or AMD CPU microcode package selected for vendor ${cpu_vendor:-unknown}"
+      fail "unsupported physical CPU vendor: ${cpu_vendor:-unknown}; Hermarchy currently supports Intel and AMD"
     fi
   fi
 
   log "Installing the base Arch system"
   pacstrap -K "$TARGET" "${target_packages[@]}"
+  write_mkinitcpio_preset "$TARGET/etc/mkinitcpio.d/linux.preset"
   arch-chroot "$TARGET" mkinitcpio -P
   if [[ -n $microcode_blob ]]; then
     for initramfs in /boot/initramfs-linux.img /boot/initramfs-linux-fallback.img; do

@@ -4,7 +4,7 @@ Milestone 1 delivers a real x86_64 Arch-based console system, not a VM-only demo
 
 ## Supported installation contract
 
-- x86_64 with writable 64-bit UEFI variables and Secure Boot disabled
+- x86_64 on Intel or AMD physical CPUs, or a supported virtual machine, with writable 64-bit UEFI variables and Secure Boot disabled
 - online installation from current official Arch `core` and `extra` repositories
 - whole-disk destructive GPT layout
 - 1 GiB FAT32 ESP mounted at `/boot`
@@ -15,6 +15,8 @@ Milestone 1 delivers a real x86_64 Arch-based console system, not a VM-only demo
 - one wheel user, locked root account, UTC, and `en_US.UTF-8`
 
 The installed system must support normal full Arch upgrades and installation of additional official packages with Pacman.
+
+The live environment keeps the standard in-kernel Broadcom drivers active and provides proprietary `wl` only as a manual fallback. The Milestone 1 target installs `linux-firmware` and the standard kernel drivers; automatic target installation and selection of proprietary `wl` remains outside this milestone and must not be implied by live-ISO support.
 
 ## Acceptance gates
 

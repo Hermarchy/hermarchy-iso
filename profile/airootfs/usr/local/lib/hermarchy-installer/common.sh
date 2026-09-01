@@ -66,6 +66,18 @@ write_systemd_boot_entry() {
   } >"$destination"
 }
 
+write_mkinitcpio_preset() {
+  local destination=$1
+  cat >"$destination" <<'EOF'
+# Hermarchy target preset: retain an all-modules fallback image.
+ALL_kver="/boot/vmlinuz-linux"
+PRESETS=('default' 'fallback')
+default_image="/boot/initramfs-linux.img"
+fallback_image="/boot/initramfs-linux-fallback.img"
+fallback_options="-S autodetect"
+EOF
+}
+
 validate_uefi_environment() {
   local platform_size efivar_options secure_boot_var secure_boot
 
@@ -133,7 +145,7 @@ eligible_disks_from_json() {
 list_install_disks() {
   local json live_disk
   live_disk=$(find_live_disk)
-  json=$(lsblk --json --bytes --paths --output PATH,TYPE,SIZE,MODEL,RM,RO,MOUNTPOINTS)
+  json=$(lsblk --tree --json --bytes --paths --output PATH,TYPE,SIZE,MODEL,RM,RO,MOUNTPOINTS)
   eligible_disks_from_json "$json" "$live_disk"
 }
 
@@ -166,7 +178,7 @@ validate_install_disk() {
   mounts=$(lsblk -nrpo MOUNTPOINTS "$disk" | tr -d '[:space:]')
   [[ -z $mounts ]] || fail "$disk or one of its partitions is mounted"
 
-  descendants=$(lsblk --json --paths --output PATH,TYPE "$disk")
+  descendants=$(lsblk --tree --json --paths --output PATH,TYPE "$disk")
   jq -e '[.. | objects | .type? // empty] | all(. == "disk" or . == "part")' \
     <<<"$descendants" >/dev/null || fail "$disk contains stacked block devices"
 
