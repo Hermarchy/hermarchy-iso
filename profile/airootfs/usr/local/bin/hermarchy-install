@@ -165,7 +165,7 @@ EOF
   systemctl --root="$TARGET" is-enabled NetworkManager.service >/dev/null
 
   log "Installing systemd-boot"
-  arch-chroot "$TARGET" bootctl --esp-path=/boot install
+  arch-chroot -S "$TARGET" bootctl --esp-path=/boot install
   root_uuid=$(blkid -s UUID -o value "$root")
   [[ $root_uuid =~ ^[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}$ ]] ||
     fail "could not determine a valid root filesystem UUID"
@@ -190,8 +190,8 @@ EOF
   for boot_file in "${boot_files[@]}"; do
     [[ -f $boot_file ]] || fail "required boot file is missing: ${boot_file#"$TARGET"}"
   done
-  arch-chroot "$TARGET" bootctl --esp-path=/boot is-installed >/dev/null
-  arch-chroot "$TARGET" bootctl --esp-path=/boot list >/dev/null
+  arch-chroot -S "$TARGET" bootctl --esp-path=/boot is-installed >/dev/null
+  arch-chroot -S "$TARGET" bootctl --esp-path=/boot list >/dev/null
 
   sync
   INSTALL_SUCCEEDED=1
