@@ -1,6 +1,6 @@
 # Hermarchy ISO
 
-Development tooling for the Hermarchy installation ISO. The current milestone is a basic x86_64 ArchISO that boots directly into a custom Hermarchy installer. It does not invoke `archinstall`.
+Development tooling for an otherwise unchanged Arch Linux installation ISO whose only product-specific runtime component is the Hermarchy installer. The live profile retains ArchISO's identity, boot modes, packages, hardware support, recovery tools, services, and configuration, adding only the installer dependencies `dialog` and `jq`. The upstream `archinstall` tool remains available from the live shell but is not invoked by the Hermarchy installer. A desktop environment is the next milestone.
 
 ## Development policy
 
@@ -12,7 +12,7 @@ Development tooling for the Hermarchy installation ISO. The current milestone is
 
 ## Current installer scope
 
-- x86_64 UEFI-only live ISO
+- Normal ArchISO x86_64 live environment with BIOS and UEFI boot support
 - UEFI-only installed target
 - Online packages from official Arch repositories
 - Whole-disk destructive repartition and format (not forensic secure erase)
@@ -20,9 +20,14 @@ Development tooling for the Hermarchy installation ISO. The current milestone is
 - systemd-boot
 - One user with wheel/sudo access
 - NetworkManager enabled on the target
+- CPU-appropriate Intel or AMD microcode package installed on physical targets when available; Arch's unmodified mkinitcpio hooks handle early loading
 - UTC and `en_US.UTF-8`
 
+The target keeps Arch's package-provided identity, repositories, kernel, initramfs configuration, and services. The installer does not add Hermarchy packages, repositories, release metadata, or persistent runtime services.
+
 Not yet supported: encryption, dual boot, partition preservation, offline installation, Secure Boot, custom Hermarchy packages, RCs, or production releases.
+
+See [`docs/milestone-1.md`](docs/milestone-1.md) for the console-foundation contract and acceptance gates.
 
 ## Repository layout
 
@@ -36,15 +41,18 @@ Not yet supported: encryption, dual boot, partition preservation, offline instal
 - `test/` — VM-free validation and transaction tests
 - `.github/workflows/build-dev-iso.yml` — manual build-and-publish workflow
 
-The base profile was imported from ArchISO commit `f900196af8f293ec7e4ef452b368b9db8012d79f`; see `profile/ARCHISO_UPSTREAM`. It has been modified for Hermarchy. This repository is distributed under GPL-3.0; see `LICENSE`.
+The base profile was imported from ArchISO commit `f900196af8f293ec7e4ef452b368b9db8012d79f`; see `profile/ARCHISO_UPSTREAM`. Tests permit only the installer files, the two direct dependencies above, two executable declarations, and reviewed tty1 launch integration. This repository is distributed under GPL-3.0; see `LICENSE`.
 
 ## Run tests
 
 ```bash
 ./test/all
+./bin/resolve-profile-packages
 ```
 
-Tests validate shell syntax, shellcheck, input validation, disk filtering, NVMe-style partition discovery, profile invariants, manual-only workflow triggers, and R2 replacement/rollback behavior. They do not touch block devices or create an ISO.
+`./test/all` validates shell syntax, shellcheck, input validation, CPU microcode selection and boot-entry generation, disk filtering, NVMe-style partition discovery, profile invariants, resolver container policy, manual-only workflow triggers, and R2 replacement/rollback behavior. It does not touch block devices, access real R2, or create an ISO.
+
+`./bin/resolve-profile-packages` uses the same digest-pinned Arch container and `profile/pacman.conf` as the build to resolve the complete live package list. It requires network and Docker access, but it is unprivileged and does not invoke `mkarchiso`. Run it before requesting a dev ISO so upstream profile/package drift fails explicitly instead of being repaired with Hermarchy-specific live-OS substitutions.
 
 ## Build locally
 
@@ -54,9 +62,9 @@ Building creates a real dev ISO, so run this only after Dillon explicitly reques
 ./bin/build-iso --clean
 ```
 
-Requirements are Docker and permission to use privileged containers. The wrapper runs `mkarchiso` inside a digest-pinned Arch Linux container and writes one commit-identified image under `release/`.
+Requirements are Docker and either direct daemon access or passwordless `sudo docker`; privileged containers are used only for the actual ArchISO build. The wrapper runs `mkarchiso` inside a digest-pinned Arch Linux container and writes one commit-identified image under `release/`.
 
-The build refuses any uncommitted files or changes so `/etc/hermarchy-build` always names a committed source revision.
+The build refuses uncommitted files or changes. The output filename and separately published `build.json` record the exact source commit without injecting Hermarchy release metadata into the Arch live filesystem.
 
 ## Test in QEMU
 

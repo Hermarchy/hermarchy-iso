@@ -16,9 +16,23 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  validate-ref:
+    name: Reject non-dev dispatches
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Confirm requested branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == "refs/heads/dev" ]] || {
+            echo "This workflow may only build the dev branch." >&2
+            exit 1
+          }
+
   build-and-publish:
     name: Build, verify, and replace current dev ISO
-    if: github.ref == 'refs/heads/dev'
+    needs: validate-ref
     runs-on: ubuntu-latest
     environment: dev-iso
     timeout-minutes: 180
@@ -31,15 +45,6 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      - name: Confirm requested branch
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ "$GITHUB_REF" == "refs/heads/dev" ]] || {
-            echo "This workflow may only build the dev branch." >&2
-            exit 1
-          }
-
       - name: Install validation and publishing tools
         shell: bash
         run: |
@@ -49,6 +54,9 @@ jobs:
 
       - name: Run tests
         run: ./test/all
+
+      - name: Resolve ArchISO profile packages
+        run: ./bin/resolve-profile-packages
 
       - name: Build ISO
         run: ./bin/build-iso --clean

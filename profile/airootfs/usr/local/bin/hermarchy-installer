@@ -1,6 +1,7 @@
 #!/bin/bash
 
 set -euo pipefail
+shopt -u varredir_close
 
 readonly LIB_DIR=/usr/local/lib/hermarchy-installer
 # shellcheck source=profile/airootfs/usr/local/lib/hermarchy-installer/common.sh
@@ -20,7 +21,7 @@ input_value() {
 
 password_value() {
   local prompt=$1 value
-  value=$("${DIALOG[@]}" --stdout --insecure --title "Hermarchy Installer" --passwordbox "$prompt" 10 72) || return 1
+  value=$("${DIALOG[@]}" --stdout --title "Hermarchy Installer" --passwordbox "$prompt" 10 72) || return 1
   printf '%s' "$value"
 }
 
@@ -42,7 +43,7 @@ choose_disk() {
 }
 
 main() {
-  local disk hostname username password confirm_password confirmation status uefi_error
+  local disk disk_fd disk_handle disk_identity hostname username password confirm_password confirmation status uefi_error identity_error
 
   [[ $EUID == 0 ]] || fail "installer must run as root"
   [[ $(tty) == /dev/tty1 ]] || fail "installer must run on tty1"
@@ -54,24 +55,43 @@ main() {
     return 1
   fi
 
-  if ! curl --fail --silent --show-error --head --connect-timeout 10 https://geo.mirror.pkgbuild.com/ >/dev/null; then
-    message "No working network connection was detected. Connect to the network and run hermarchy-installer again."
+  if ! pacman -Sy --noconfirm >/dev/null 2>&1; then
+    message "The configured official Arch repositories could not be synchronized. Connect to the network and run hermarchy-installer again."
     return 1
   fi
 
   disk=$(choose_disk) || return 1
   validate_install_disk "$disk"
+  exec {disk_fd}<>"$disk" || {
+    message "The selected disk could not be opened safely."
+    return 1
+  }
+  disk_handle="/proc/self/fd/$disk_fd"
+  [[ -b $disk_handle ]] || {
+    message "The selected disk handle is not a block device."
+    return 1
+  }
+  disk_identity=$(installation_disk_identity "$disk_handle") || {
+    message "The selected disk identity could not be read safely."
+    return 1
+  }
+  if ! identity_error=$(validate_disk_identity_for_environment "$disk_identity" 2>&1); then
+    message "The selected disk cannot be bound safely.\n\n$identity_error"
+    return 1
+  fi
 
   while :; do
-    hostname=$(input_value "Hostname:" "hermarchy") || return 1
+    hostname=$(input_value "Hostname:" "archlinux") || return 1
     validate_hostname "$hostname" && break
-    message "Hostname must be 1-63 letters, digits, or hyphens, and cannot begin or end with a hyphen."
+    message "Hostname must be 1-63 lowercase letters, digits, or hyphens, and cannot begin or end with a hyphen."
   done
 
   while :; do
-    username=$(input_value "Username:" "hermarchy") || return 1
-    validate_username "$username" && break
-    message "Username must start with a lowercase letter or underscore, contain only lowercase letters, digits, underscores, or hyphens, and cannot be root or nobody."
+    username=$(input_value "Username:" "user") || return 1
+    if validate_username "$username" && ! username_conflicts_with_system_account "$username"; then
+      break
+    fi
+    message "Username must start with a lowercase letter or underscore, contain only lowercase letters, digits, underscores, or hyphens, and must not be reserved by the Arch base system."
   done
 
   while :; do
@@ -93,7 +113,7 @@ main() {
   fi
 
   if ! "${DIALOG[@]}" --title "Confirm installation" --yesno \
-    "Install Hermarchy with these settings?\n\nDisk: $disk\nHostname: $hostname\nUser: $username\nFilesystem: ext4\nBootloader: systemd-boot\nTimezone: UTC" 18 72; then
+    "Install Arch Linux with these settings?\n\nDisk: $disk\nHostname: $hostname\nUser: $username\nFilesystem: ext4\nBootloader: systemd-boot\nTimezone: UTC" 18 72; then
     unset password
     return 0
   fi
@@ -105,16 +125,20 @@ main() {
   set +e
   /usr/local/bin/hermarchy-install \
     --disk "$disk" \
+    --disk-fd "$disk_fd" \
+    --confirm-disk "$disk" \
+    --confirm-identity "$disk_identity" \
     --hostname "$hostname" \
     --username "$username" \
     --password-fd 3
   status=$?
   set -e
   exec 3<&-
+  exec {disk_fd}>&-
 
   if (( status == 0 )); then
     if "${DIALOG[@]}" --title "Installation complete" --yesno \
-      "Hermarchy was installed successfully. Remove the installation media when the machine restarts.\n\nReboot now?" 12 72; then
+      "Arch Linux was installed successfully. Remove the installation media when the machine restarts.\n\nReboot now?" 12 72; then
       systemctl reboot
     fi
   else

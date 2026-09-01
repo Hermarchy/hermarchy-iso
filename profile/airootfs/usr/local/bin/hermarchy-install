@@ -1,6 +1,7 @@
 #!/bin/bash
 
 set -Eeuo pipefail
+shopt -u varredir_close
 IFS=$'\n\t'
 
 readonly LIB_DIR=/usr/local/lib/hermarchy-installer
@@ -12,31 +13,36 @@ readonly TARGET=/mnt
 readonly ESP_GUID=c12a7328-f81f-11d2-ba4b-00a0c93ec93b
 readonly ROOT_GUID=4f68bce3-e8cd-4db1-96e7-fbcaf984b709
 INSTALL_SUCCEEDED=0
+INSTALL_ATTEMPTED=0
+TARGET_MOUNTED=0
 
 usage() {
-  printf 'Usage: hermarchy-install --disk DISK --hostname NAME --username USER --password-fd FD\n' >&2
+  printf 'Usage: hermarchy-install --disk DISK --disk-fd FD --confirm-disk DISK --confirm-identity JSON --hostname NAME --username USER --password-fd FD\n' >&2
 }
 
 cleanup() {
-  local status=$?
+  local status=$? cleanup_status
+  cleanup_status=$status
   set +e
-  sync
-  if mountpoint -q "$TARGET"; then
-    if [[ -d $TARGET/var/log ]]; then
-      install -m 0600 "$LOG_FILE" "$TARGET/var/log/hermarchy-installer.log" || true
-    fi
-    umount -R "$TARGET"
+  if (( INSTALL_ATTEMPTED )); then
+    sync || cleanup_status=1
   fi
-  if (( status != 0 || INSTALL_SUCCEEDED == 0 )); then
+  if (( TARGET_MOUNTED )); then
+    if [[ -d $TARGET/var/log ]]; then
+      install -m 0600 "$LOG_FILE" "$TARGET/var/log/hermarchy-installer.log" || cleanup_status=1
+    fi
+    umount -R "$TARGET" || cleanup_status=1
+  fi
+  if (( INSTALL_ATTEMPTED && (cleanup_status != 0 || INSTALL_SUCCEEDED == 0) )); then
     printf '[hermarchy] Installation failed. Log: %s\n' "$LOG_FILE" >&2
   fi
-  return "$status"
+  return "$cleanup_status"
 }
 trap cleanup EXIT
 
 require_commands() {
   local command
-  for command in arch-chroot blkid bootctl findmnt flock genfstab install jq lsblk mkfs.ext4 mkfs.fat mount mountpoint od pacstrap partprobe readlink sgdisk swapon systemctl udevadm umount uname wipefs; do
+  for command in arch-chroot blkid bootctl findmnt flock genfstab getent install jq lsblk mkfs.ext4 mkfs.fat mount mountpoint od pacman pacstrap partprobe readlink sgdisk swapon systemctl systemd-detect-virt udevadm umount uname wipefs; do
     command -v "$command" >/dev/null || fail "required command is missing: $command"
   done
 }
@@ -45,55 +51,93 @@ verify_mount_source() {
   local mountpoint_path=$1 expected=$2 actual
   actual=$(findmnt -nro SOURCE --target "$mountpoint_path")
   actual=$(readlink -f "$actual")
+  expected=$(readlink -f "$expected")
   [[ $actual == "$expected" ]] || fail "$mountpoint_path is backed by $actual instead of $expected"
 }
 
 install_system() {
-  local disk=$1 hostname=$2 username=$3 password=$4
-  local disk_json disk_kname esp root root_uuid fstab_tmp
+  local disk=$1 hostname=$2 username=$3 password=$4 expected_identity=$5 disk_handle=$6
+  local disk_json esp root esp_handle root_handle root_uuid fstab_tmp cpu_vendor microcode_package boot_file existing_mount mount_targets current_identity handle_identity esp_fd root_fd
+  local -a target_packages=(base linux linux-firmware mkinitcpio networkmanager sudo)
+  local -a boot_files
 
   [[ $EUID == 0 ]] || fail "installer must run as root"
   validate_uefi_environment
   validate_install_disk "$disk"
   validate_hostname "$hostname" || fail "invalid hostname: $hostname"
   validate_username "$username" || fail "invalid username: $username"
+  ! username_conflicts_with_system_account "$username" || fail "username is reserved by the Arch base system: $username"
   [[ -n $password ]] || fail "password must not be empty"
   [[ $password != *:* && $password != *$'\n'* ]] || fail "password contains an unsupported colon or newline"
   mountpoint -q "$TARGET" && fail "$TARGET is already mounted"
+  mount_targets=$(findmnt -rn -o TARGET) || fail 'could not inspect current mount targets'
+  if existing_mount=$(target_mount_conflict "$TARGET" <<<"$mount_targets"); then
+    fail "$TARGET or one of its descendants is already mounted: $existing_mount"
+  fi
 
-  disk_kname=$(lsblk -dnro KNAME "$disk")
+  cpu_vendor=''
+  microcode_package=''
+  if systemd-detect-virt --quiet; then
+    log 'Virtual machine detected; CPU microcode remains the host responsibility'
+  else
+    cpu_vendor=$(cpu_vendor_from_cpuinfo)
+    microcode_package=$(microcode_package_for_vendor "$cpu_vendor")
+    if [[ -n $microcode_package ]]; then
+      target_packages+=("$microcode_package")
+      log "Installing $microcode_package for CPU vendor $cpu_vendor"
+    else
+      log "No Arch microcode package is available for CPU vendor ${cpu_vendor:-unknown}; continuing without one"
+    fi
+  fi
+
+  log 'Validating current official Arch package repositories'
+  pacman -Sy --noconfirm
+  pacman -Sp --noconfirm -- "${target_packages[@]}" >/dev/null ||
+    fail 'target package transaction could not be resolved'
+
+  validate_install_disk "$disk"
+  current_identity=$(installation_disk_identity "$disk") || fail "could not read installation disk identity"
+  [[ $current_identity == "$expected_identity" ]] || fail "installation disk identity changed before erasure"
+  [[ -b $disk_handle ]] || fail "installation disk handle is no longer a block device"
+  handle_identity=$(installation_disk_identity "$disk_handle") || fail "could not read installation disk handle identity"
+  [[ $handle_identity == "$expected_identity" ]] || fail "installation disk handle identity changed before erasure"
 
   log "Erasing partition metadata and repartitioning $disk"
-  wipefs --all --force "$disk"
-  sgdisk --zap-all "$disk"
+  wipefs --all --force "$disk_handle"
+  sgdisk --zap-all "$disk_handle"
   sgdisk --clear \
     --new=1:0:+1GiB --typecode=1:"$ESP_GUID" --change-name=1:'EFI System' \
-    --new=2:0:0 --typecode=2:"$ROOT_GUID" --change-name=2:'Hermarchy Root' \
-    "$disk"
-  partprobe "$disk"
+    --new=2:0:0 --typecode=2:"$ROOT_GUID" --change-name=2:'Linux root (x86-64)' \
+    "$disk_handle"
+  partprobe "$disk_handle"
   udevadm settle --timeout=10
 
-  disk_json=$(lsblk --json --paths --output PATH,PARTN,PKNAME,PARTTYPE "$disk")
-  esp=$(partition_path_from_json "$disk_json" 1 "$disk_kname" "$ESP_GUID")
-  root=$(partition_path_from_json "$disk_json" 2 "$disk_kname" "$ROOT_GUID")
+  disk_json=$(lsblk --tree --json --paths --output PATH,PARTN,PKNAME,PARTTYPE "$disk_handle")
+  esp=$(partition_path_from_json "$disk_json" 1 "$disk" "$ESP_GUID")
+  root=$(partition_path_from_json "$disk_json" 2 "$disk" "$ROOT_GUID")
   esp=$(readlink -e "$esp")
   root=$(readlink -e "$root")
   [[ -b $esp && -b $root ]] || fail "new partition devices were not created"
+  exec {esp_fd}<>"$esp" || fail "could not bind the EFI partition device"
+  exec {root_fd}<>"$root" || fail "could not bind the root partition device"
+  esp_handle="/proc/self/fd/$esp_fd"
+  root_handle="/proc/self/fd/$root_fd"
+  [[ -b $esp_handle && -b $root_handle ]] || fail "new partition handles are not block devices"
 
   log "Formatting $esp as FAT32"
-  mkfs.fat -F 32 -n HERMARCHY_EFI "$esp"
+  mkfs.fat -F 32 -n EFI "$esp_handle"
   log "Formatting $root as ext4"
-  mkfs.ext4 -F -L HERMARCHY_ROOT "$root"
+  mkfs.ext4 -F -L root "$root_handle"
 
-  mount "$root" "$TARGET"
+  mount "$root_handle" "$TARGET"
+  TARGET_MOUNTED=1
   install -d -m 0755 "$TARGET/boot"
-  mount "$esp" "$TARGET/boot"
-  verify_mount_source "$TARGET" "$root"
-  verify_mount_source "$TARGET/boot" "$esp"
+  mount "$esp_handle" "$TARGET/boot"
+  verify_mount_source "$TARGET" "$root_handle"
+  verify_mount_source "$TARGET/boot" "$esp_handle"
 
   log "Installing the base Arch system"
-  pacstrap -K "$TARGET" \
-    base linux linux-firmware networkmanager sudo
+  pacstrap -K "$TARGET" "${target_packages[@]}"
 
   fstab_tmp="$TARGET/etc/fstab.hermarchy.tmp"
   genfstab -U "$TARGET" >"$fstab_tmp"
@@ -128,47 +172,36 @@ EOF
   chmod 0440 "$TARGET/etc/sudoers.d/10-wheel"
   arch-chroot "$TARGET" visudo --check --file=/etc/sudoers
   systemctl --root="$TARGET" enable NetworkManager.service
+  systemctl --root="$TARGET" is-enabled NetworkManager.service >/dev/null
 
   log "Installing systemd-boot"
   arch-chroot -S "$TARGET" bootctl --esp-path=/boot install
-  root_uuid=$(blkid -s UUID -o value "$root")
+  root_uuid=$(blkid -s UUID -o value "$root_handle")
   [[ $root_uuid =~ ^[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}$ ]] ||
     fail "could not determine a valid root filesystem UUID"
 
   install -d -m 0755 "$TARGET/boot/loader/entries"
   cat >"$TARGET/boot/loader/loader.conf" <<EOF
-default hermarchy.conf
+default arch.conf
 timeout 3
 console-mode keep
 editor no
 EOF
-  cat >"$TARGET/boot/loader/entries/hermarchy.conf" <<EOF
-title Hermarchy
-linux /vmlinuz-linux
-initrd /initramfs-linux.img
-options root=UUID=$root_uuid rw
-EOF
-  cat >"$TARGET/boot/loader/entries/hermarchy-fallback.conf" <<EOF
-title Hermarchy (fallback initramfs)
-linux /vmlinuz-linux
-initrd /initramfs-linux-fallback.img
-options root=UUID=$root_uuid rw
-EOF
+  write_systemd_boot_entry \
+    "$TARGET/boot/loader/entries/arch.conf" \
+    'Arch Linux' /initramfs-linux.img "$root_uuid"
 
-  for boot_file in \
-    "$TARGET/boot/EFI/systemd/systemd-bootx64.efi" \
-    "$TARGET/boot/EFI/BOOT/BOOTX64.EFI" \
-    "$TARGET/boot/vmlinuz-linux" \
-    "$TARGET/boot/initramfs-linux.img" \
-    "$TARGET/boot/initramfs-linux-fallback.img"; do
+  boot_files=(
+    "$TARGET/boot/EFI/systemd/systemd-bootx64.efi"
+    "$TARGET/boot/EFI/BOOT/BOOTX64.EFI"
+    "$TARGET/boot/vmlinuz-linux"
+    "$TARGET/boot/initramfs-linux.img"
+  )
+  for boot_file in "${boot_files[@]}"; do
     [[ -f $boot_file ]] || fail "required boot file is missing: ${boot_file#"$TARGET"}"
   done
   arch-chroot -S "$TARGET" bootctl --esp-path=/boot is-installed >/dev/null
-
-  printf '%s\n' \
-    'channel=dev' \
-    'installer=hermarchy-basic' \
-    >"$TARGET/etc/hermarchy-release"
+  arch-chroot -S "$TARGET" bootctl --esp-path=/boot list >/dev/null
 
   sync
   INSTALL_SUCCEEDED=1
@@ -176,10 +209,13 @@ EOF
 }
 
 main() {
-  local disk='' hostname='' username='' password_fd='' password canonical_disk
+  local disk='' disk_fd='' disk_handle confirm_disk='' confirm_identity='' hostname='' username='' password_fd='' password canonical_disk current_identity handle_identity
   while (( $# > 0 )); do
     case $1 in
       --disk) disk=${2:-}; shift 2 ;;
+      --disk-fd) disk_fd=${2:-}; shift 2 ;;
+      --confirm-disk) confirm_disk=${2:-}; shift 2 ;;
+      --confirm-identity) confirm_identity=${2:-}; shift 2 ;;
       --hostname) hostname=${2:-}; shift 2 ;;
       --username) username=${2:-}; shift 2 ;;
       --password-fd) password_fd=${2:-}; shift 2 ;;
@@ -188,11 +224,12 @@ main() {
     esac
   done
 
-  [[ -n $disk && -n $hostname && -n $username && -n $password_fd ]] || {
+  [[ -n $disk && -n $disk_fd && -n $confirm_disk && -n $confirm_identity && -n $hostname && -n $username && -n $password_fd ]] || {
     usage
     return 2
   }
   [[ $password_fd =~ ^[0-9]+$ ]] || fail "password file descriptor must be numeric"
+  [[ $disk_fd =~ ^[0-9]+$ ]] || fail "disk file descriptor must be numeric"
 
   require_commands
   install -d -m 0755 /run/lock
@@ -200,8 +237,18 @@ main() {
   flock -n 9 || fail "another Hermarchy installer is already running"
 
   canonical_disk=$(readlink -e "$disk") || fail "could not canonicalize installation disk: $disk"
+  [[ $confirm_disk == "$canonical_disk" ]] ||
+    fail "confirmation disk does not exactly match the canonical installation disk: $canonical_disk"
+  current_identity=$(installation_disk_identity "$canonical_disk") || fail "could not read installation disk identity"
+  [[ $current_identity == "$confirm_identity" ]] || fail "confirmation identity does not match the selected installation disk"
+  validate_disk_identity_for_environment "$confirm_identity"
+  disk_handle="/proc/self/fd/$disk_fd"
+  [[ -b $disk_handle ]] || fail "inherited installation disk handle is not a block device"
+  handle_identity=$(installation_disk_identity "$disk_handle") || fail "could not read inherited installation disk handle identity"
+  [[ $handle_identity == "$confirm_identity" ]] || fail "inherited disk handle does not match the selected installation disk"
   IFS= read -r -d '' password <&"$password_fd" || true
-  install_system "$canonical_disk" "$hostname" "$username" "$password"
+  INSTALL_ATTEMPTED=1
+  install_system "$canonical_disk" "$hostname" "$username" "$password" "$confirm_identity" "$disk_handle"
   unset password
 }
 

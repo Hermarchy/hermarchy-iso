@@ -1,7 +1,49 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-set -euo pipefail
+script_cmdline() {
+    local param
+    for param in $(</proc/cmdline); do
+        case "${param}" in
+            script=*)
+                echo "${param#*=}"
+                return 0
+                ;;
+        esac
+    done
+}
 
-[[ $(tty) == /dev/tty1 ]] || exit 0
+automated_script() {
+    local script rt
+    script="$(script_cmdline)"
+    if [[ -n "${script}" && ! -x /tmp/startup_script ]]; then
+        if [[ "${script}" =~ ^((http|https|ftp|tftp)://) ]]; then
+            printf '%s: downloading %s\n' "$0" "${script}"
+            # there's no synchronization for network availability before executing this script; to ensure the network
+            # is online, we use a transient systemd service that depends on network-online.target to download the
+            # script rather than manually polling the target
+            systemd-run --pty --quiet -p Wants=network-online.target -p After=network-online.target \
+                curl "${script}" --location --retry-connrefused --retry 10 --fail -s -o /tmp/startup_script
+            rt=$?
+        else
+            cp "${script}" /tmp/startup_script
+            rt=$?
+        fi
+        if [[ ${rt} -eq 0 ]]; then
+            chmod +x /tmp/startup_script
+            printf '%s: executing automated script\n' "$0"
+            # note that script is executed when other services (like pacman-init) may be still in progress, please
+            # synchronize to "systemctl is-system-running --wait" when your script depends on other services
+            /tmp/startup_script
+        fi
+    fi
+}
 
-exec /usr/local/bin/hermarchy-installer
+if [[ $(tty) == "/dev/tty1" ]]; then
+    if [[ -n $(script_cmdline) ]]; then
+        automated_script
+    else
+        systemctl is-system-running --wait >/dev/null 2>&1 || true
+        /usr/local/bin/hermarchy-installer ||
+            printf 'Hermarchy installer exited. The normal Arch live shell remains available.\n' >&2
+    fi
+fi
