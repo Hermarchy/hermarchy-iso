@@ -33,7 +33,7 @@ required_engine = (
     'installation disk identity changed before erasure',
     'validate_uefi_environment',
     'validate_install_disk "$disk"',
-    'arch-chroot -S "$TARGET" bootctl',
+    'arch-chroot "$TARGET" bootctl',
     'bootctl --esp-path=/boot list',
     'systemctl --root="$TARGET" enable NetworkManager.service',
     'systemctl --root="$TARGET" is-enabled NetworkManager.service',
@@ -60,6 +60,8 @@ if '--confirm-identity "$disk_identity"' not in ui:
     raise SystemExit('installer UI must bind the engine to the selected physical disk identity')
 if '--insecure' in ui:
     raise SystemExit('password dialog must not disclose password length')
+if 'arch-chroot -' in engine:
+    raise SystemExit('arch-chroot options must not be invented; pass the target directory first')
 if engine.count('validate_install_disk "$disk"') < 2:
     raise SystemExit('installation disk must be revalidated after package preflight and immediately before erasure')
 first_validation=engine.index('validate_install_disk "$disk"')
