@@ -28,6 +28,7 @@ required_engine = (
     'INSTALL_ATTEMPTED=1',
     'TARGET_MOUNTED=1',
     '--confirm-disk',
+    '--disk-fd',
     '--confirm-identity',
     'confirmation disk does not exactly match',
     'installation disk identity changed before erasure',
@@ -56,6 +57,10 @@ if 'if (( TARGET_MOUNTED )); then' not in cleanup or 'mountpoint -q "$TARGET"' i
     raise SystemExit('cleanup must unmount only a target mount created by this installer process')
 if '--confirm-disk "$disk"' not in ui:
     raise SystemExit('installer UI must bind the engine confirmation to the exact selected disk')
+if '--disk-fd "$disk_fd"' not in ui or 'exec {disk_fd}<>"$disk"' not in ui:
+    raise SystemExit('installer UI must hold and pass an open handle for the selected disk')
+if 'shopt -u varredir_close' not in ui or 'shopt -u varredir_close' not in engine:
+    raise SystemExit('allocated disk and partition descriptors must survive child command execution')
 if '--confirm-identity "$disk_identity"' not in ui:
     raise SystemExit('installer UI must bind the engine to the selected physical disk identity')
 if '--insecure' in ui:
@@ -64,15 +69,19 @@ if engine.count('validate_install_disk "$disk"') < 2:
     raise SystemExit('installation disk must be revalidated after package preflight and immediately before erasure')
 first_validation=engine.index('validate_install_disk "$disk"')
 second_validation=engine.index('validate_install_disk "$disk"', first_validation + 1)
-if not engine.index('pacman -Sp --noconfirm') < second_validation < engine.index('wipefs --all --force "$disk"'):
+if not engine.index('pacman -Sp --noconfirm') < second_validation < engine.index('wipefs --all --force "$disk_handle"'):
     raise SystemExit('final disk validation must occur after package resolution and before erasure')
 for preflight in (
     'pacman -Sy --noconfirm',
     'pacman -Sp --noconfirm',
     'target_mount_conflict "$TARGET"',
 ):
-    if engine.index(preflight) > engine.index('wipefs --all --force "$disk"'):
+    if engine.index(preflight) > engine.index('wipefs --all --force "$disk_handle"'):
         raise SystemExit(f'destructive operation precedes required preflight: {preflight}')
+for operation in ('wipefs --all --force', 'sgdisk --zap-all', 'partprobe'):
+    line=next((line for line in engine.splitlines() if line.strip().startswith(operation)), '')
+    if '$disk_handle' not in line:
+        raise SystemExit(f'destructive operation is not bound to the inherited disk handle: {operation}')
 if 'lsblk --tree --json --paths --output PATH,PARTN,PKNAME,PARTTYPE' not in engine:
     raise SystemExit('partition discovery must explicitly request nested lsblk JSON')
 

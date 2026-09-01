@@ -1,6 +1,7 @@
 #!/bin/bash
 
 set -euo pipefail
+shopt -u varredir_close
 
 readonly LIB_DIR=/usr/local/lib/hermarchy-installer
 # shellcheck source=profile/airootfs/usr/local/lib/hermarchy-installer/common.sh
@@ -42,7 +43,7 @@ choose_disk() {
 }
 
 main() {
-  local disk disk_identity hostname username password confirm_password confirmation status uefi_error
+  local disk disk_fd disk_handle disk_identity hostname username password confirm_password confirmation status uefi_error
 
   [[ $EUID == 0 ]] || fail "installer must run as root"
   [[ $(tty) == /dev/tty1 ]] || fail "installer must run on tty1"
@@ -61,7 +62,16 @@ main() {
 
   disk=$(choose_disk) || return 1
   validate_install_disk "$disk"
-  disk_identity=$(installation_disk_identity "$disk") || {
+  exec {disk_fd}<>"$disk" || {
+    message "The selected disk could not be opened safely."
+    return 1
+  }
+  disk_handle="/proc/self/fd/$disk_fd"
+  [[ -b $disk_handle ]] || {
+    message "The selected disk handle is not a block device."
+    return 1
+  }
+  disk_identity=$(installation_disk_identity "$disk_handle") || {
     message "The selected disk identity could not be read safely."
     return 1
   }
@@ -111,6 +121,7 @@ main() {
   set +e
   /usr/local/bin/hermarchy-install \
     --disk "$disk" \
+    --disk-fd "$disk_fd" \
     --confirm-disk "$disk" \
     --confirm-identity "$disk_identity" \
     --hostname "$hostname" \
@@ -119,6 +130,7 @@ main() {
   status=$?
   set -e
   exec 3<&-
+  exec {disk_fd}>&-
 
   if (( status == 0 )); then
     if "${DIALOG[@]}" --title "Installation complete" --yesno \

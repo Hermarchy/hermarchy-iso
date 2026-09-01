@@ -31,10 +31,22 @@ assert_failure validate_username 'bad.name'
 pass 'username validation'
 
 install -d "$TMP/sysusers"
-printf 'u archreserved - "Reserved test user"\n' >"$TMP/sysusers/arch.conf"
-assert_success username_conflicts_with_system_account archreserved "$TMP/sysusers"
+cat >"$TMP/sysusers/arch.conf" <<'EOF'
+u archreserved - "Reserved test user"
+m memberreserved wheel
+g groupreserved -
+m anotheruser mgroupreserved
+EOF
+for reserved in archreserved memberreserved groupreserved mgroupreserved; do
+  assert_success username_conflicts_with_system_account "$reserved" "$TMP/sysusers"
+done
 assert_failure username_conflicts_with_system_account definitely_not_an_arch_account_987 "$TMP/sysusers"
-pass 'target system-account collision detection'
+
+install -d "$TMP/sysusers-etc" "$TMP/sysusers-usr"
+printf 'u maskedreserved - "Masked test user"\n' >"$TMP/sysusers-usr/package.conf"
+ln -s /dev/null "$TMP/sysusers-etc/package.conf"
+assert_failure username_conflicts_with_system_account maskedreserved "$TMP/sysusers-etc" "$TMP/sysusers-usr"
+pass 'target system-account and group collision detection honors sysusers precedence'
 
 cat >"$TMP/cpuinfo-intel" <<'EOF'
 processor : 0

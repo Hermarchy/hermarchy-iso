@@ -29,14 +29,35 @@ validate_username() {
 }
 
 username_conflicts_with_system_account() {
-  local value=$1 sysusers_dir=${2:-/usr/lib/sysusers.d} file type name
+  local value=$1 file basename type name group sysusers_dir
+  local -a sysusers_dirs
+  declare -A seen_files=()
+  shift
+
+  if (( $# > 0 )); then
+    sysusers_dirs=("$@")
+  else
+    sysusers_dirs=(/etc/sysusers.d /run/sysusers.d /usr/local/lib/sysusers.d /usr/lib/sysusers.d)
+  fi
 
   getent passwd "$value" >/dev/null 2>&1 && return 0
-  for file in "$sysusers_dir"/*.conf; do
-    [[ -f $file ]] || continue
-    while read -r type name _; do
-      [[ $type != \#* && $type == u* && $name == "$value" ]] && return 0
-    done <"$file"
+  getent group "$value" >/dev/null 2>&1 && return 0
+  for sysusers_dir in "${sysusers_dirs[@]}"; do
+    for file in "$sysusers_dir"/*.conf; do
+      [[ -e $file || -L $file ]] || continue
+      basename=${file##*/}
+      [[ -z ${seen_files[$basename]+present} ]] || continue
+      seen_files[$basename]=1
+      [[ -f $file ]] || continue
+      while read -r type name group _; do
+        [[ $type != \#* ]] || continue
+        case $type in
+          u*) [[ $name == "$value" ]] && return 0 ;;
+          g) [[ $name == "$value" ]] && return 0 ;;
+          m) [[ $name == "$value" || $group == "$value" ]] && return 0 ;;
+        esac
+      done <"$file"
+    done
   done
   return 1
 }
