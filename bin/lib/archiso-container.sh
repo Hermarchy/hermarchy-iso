@@ -23,9 +23,9 @@ select_archiso_container() {
     return 1
   }
 
-  ARCHISO_CONTAINER=(sudo docker)
+  ARCHISO_CONTAINER=(sudo -n docker)
   "${ARCHISO_CONTAINER[@]}" info >/dev/null 2>&1 || {
-    echo 'docker is unavailable through both the current user and sudo' >&2
+    echo 'docker is unavailable through both the current user and passwordless sudo' >&2
     return 1
   }
 }

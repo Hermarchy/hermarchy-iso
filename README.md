@@ -46,11 +46,14 @@ The base profile was imported from ArchISO commit `f900196af8f293ec7e4ef452b368b
 ```bash
 ./test/all
 ./bin/resolve-profile-packages
+./bin/validate-profile-dkms
 ```
 
 `./test/all` validates shell syntax, shellcheck, input validation, CPU microcode selection and boot-entry generation, disk filtering, NVMe-style partition discovery, profile invariants, resolver container policy, manual-only workflow triggers, and R2 replacement/rollback behavior. It does not touch block devices, access real R2, or create an ISO.
 
 `./bin/resolve-profile-packages` uses the same digest-pinned Arch container and `profile/pacman.conf` as the build to resolve the complete live package list. It also rejects Broadcom DKMS revisions known not to build against the current Arch kernel. It requires network and Docker access, but it is unprivileged and does not invoke `mkarchiso`. Run it before requesting a dev ISO so removed, inconsistent, or known-incompatible Arch packages fail early.
+
+`./bin/validate-profile-dkms` installs the resolved kernel, matching headers, and Broadcom DKMS source in another unprivileged ephemeral container. It hard-fails unless DKMS installs `wl.ko`, `depmod` succeeds, and `modinfo` can read the module for the exact kernel. This check is required because Arch package hooks can report a DKMS warning without making the surrounding ArchISO build fail.
 
 ## Build locally
 
@@ -60,7 +63,7 @@ Building creates a real dev ISO, so run this only after Dillon explicitly reques
 ./bin/build-iso --clean
 ```
 
-Requirements are Docker and permission to use privileged containers. The wrapper runs `mkarchiso` inside a digest-pinned Arch Linux container and writes one commit-identified image under `release/`.
+Requirements are Docker and either direct daemon access or passwordless `sudo docker`; privileged containers are used only for the actual ArchISO build. The wrapper runs `mkarchiso` inside a digest-pinned Arch Linux container and writes one commit-identified image under `release/`.
 
 The build refuses any uncommitted files or changes so `/etc/hermarchy-build` always names a committed source revision.
 

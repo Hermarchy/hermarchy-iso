@@ -12,16 +12,26 @@ select_archiso_container
 # Package expressions expand inside the container shell, not in this shell.
 # shellcheck disable=SC2016
 "${ARCHISO_CONTAINER[@]}" run --rm \
+  --security-opt=no-new-privileges \
   -e ARCHISO_BUILD_IMAGE="$ARCHISO_BUILD_IMAGE" \
   -v "$PROFILE:/profile:ro" \
   "$ARCHISO_BUILD_IMAGE" \
   bash -euo pipefail -c '
     packages=()
+    package_lines=()
+    line_number=0
     while IFS= read -r package || [[ -n $package ]]; do
+      line_number=$((line_number + 1))
       package=${package%%#*}
       package=${package#"${package%%[![:space:]]*}"}
       package=${package%"${package##*[![:space:]]}"}
-      [[ -n $package ]] && packages+=("$package")
+      [[ -n $package ]] || continue
+      [[ $package != *[[:space:]]* ]] || {
+        printf "invalid package entry: line=%s value=%q\n" "$line_number" "$package" >&2
+        exit 1
+      }
+      packages+=("$package")
+      package_lines+=("$line_number")
     done </profile/packages.x86_64
 
     (( ${#packages[@]} > 0 )) || {
@@ -36,10 +46,11 @@ select_archiso_container
       cat /tmp/hermarchy-resolve-errors >&2
       echo "profile package resolution failed; checking direct package names:" >&2
       direct_failures=0
-      for package in "${packages[@]}"; do
+      for index in "${!packages[@]}"; do
+        package=${packages[$index]}
         if ! pacman --config /profile/pacman.conf -Sp --needed --noconfirm \
           "$package" >/dev/null 2>&1; then
-          printf "  unresolved: %s\n" "$package" >&2
+          printf "  unresolved: line=%s package=%s\n" "${package_lines[$index]}" "$package" >&2
           direct_failures=$((direct_failures + 1))
         fi
       done

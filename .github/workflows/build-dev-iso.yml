@@ -53,6 +53,9 @@ jobs:
       - name: Resolve ArchISO profile packages
         run: ./bin/resolve-profile-packages
 
+      - name: Validate live Broadcom DKMS module
+        run: ./bin/validate-profile-dkms
+
       - name: Build ISO
         run: ./bin/build-iso --clean
 

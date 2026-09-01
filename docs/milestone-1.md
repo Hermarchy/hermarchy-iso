@@ -20,11 +20,12 @@ The installed system must support normal full Arch upgrades and installation of 
 
 1. `./test/all` passes without touching real disks, R2, or ISO output.
 2. `./bin/resolve-profile-packages` resolves every live package from `profile/pacman.conf` in the digest-pinned Arch container.
-3. A manually requested GitHub workflow builds and publishes one checksum-verified dev ISO.
-4. The exact public ISO boots with QEMU/OVMF and automatically launches the installer on tty1.
-5. A disposable virtio disk completes installation and boots without the ISO attached.
-6. The target passes checks for GPT/ESP/ext4 layout, fstab, normal and fallback initramfs, systemd-boot, user login, sudo, NetworkManager, DNS, `pacman -Syu`, and installation of an additional official package.
-7. Representative physical Intel and AMD UEFI systems verify disk discovery, networking, early microcode loading, and reboot.
+3. `./bin/validate-profile-dkms` proves the live Broadcom module builds and is discoverable for the exact resolved kernel.
+4. A manually requested GitHub workflow builds and publishes one checksum-verified dev ISO.
+5. The exact public ISO boots with QEMU/OVMF and automatically launches the installer on tty1.
+6. A disposable virtio disk completes installation and boots without the ISO attached.
+7. The target passes checks for GPT/ESP/ext4 layout, fstab, normal and fallback initramfs, systemd-boot, user login, sudo, NetworkManager, DNS, `pacman -Syu`, and installation of an additional official package.
+8. Representative physical Intel and AMD UEFI systems verify disk discovery, wired and wireless networking, early microcode loading, and reboot; Broadcom coverage must test the default in-kernel drivers and the manual `wl` fallback without regressing Broadcom Ethernet.
 
 ## Explicitly later
 
