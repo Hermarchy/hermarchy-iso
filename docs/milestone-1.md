@@ -17,6 +17,8 @@ Milestone 1 delivers an unchanged Arch Linux console system through a custom ins
 The installed system must support normal full Arch upgrades and installation of additional official packages with Pacman.
 It retains Arch's package-provided identity and repository configuration: the installer does not add a Hermarchy release file, custom package, repository, mkinitcpio preset, kernel, or system service.
 
+Before erasure, the installer resolves the complete package transaction, revalidates the selected disk, and compares an identity snapshot containing its canonical path, kernel device number, size, model, serial, and WWN with the identity selected by the UI. It rejects live-media, removable, read-only, mounted, stacked, active-swap, and sub-8-GiB disks. Usernames that collide with current accounts or Arch system-user declarations are rejected before disk mutation.
+
 ## Acceptance gates
 
 1. `./test/all` passes without touching real disks, R2, or ISO output.

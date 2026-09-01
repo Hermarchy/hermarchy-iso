@@ -20,7 +20,9 @@ for required in (
     './bin/resolve-profile-packages',
     './bin/publish-dev-iso',
     'Verify public download set',
-    "if: github.ref == 'refs/heads/dev'",
+    'validate-ref:',
+    'needs: validate-ref',
+    '[[ "$GITHUB_REF" == "refs/heads/dev" ]]',
     'ref: ${{ github.sha }}',
     'hermarchy-dev-public.iso',
     '$ISO_URL.sha256',
@@ -28,4 +30,6 @@ for required in (
 ):
     if required not in text:
         raise SystemExit(f'missing workflow invariant: {required}')
+if "if: github.ref == 'refs/heads/dev'" in text:
+    raise SystemExit('a job-level ref condition would report a wrong-ref dispatch as skipped success')
 PY

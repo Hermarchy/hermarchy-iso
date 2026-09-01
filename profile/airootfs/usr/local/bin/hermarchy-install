@@ -16,7 +16,7 @@ INSTALL_ATTEMPTED=0
 TARGET_MOUNTED=0
 
 usage() {
-  printf 'Usage: hermarchy-install --disk DISK --confirm-disk DISK --hostname NAME --username USER --password-fd FD\n' >&2
+  printf 'Usage: hermarchy-install --disk DISK --confirm-disk DISK --confirm-identity JSON --hostname NAME --username USER --password-fd FD\n' >&2
 }
 
 cleanup() {
@@ -41,7 +41,7 @@ trap cleanup EXIT
 
 require_commands() {
   local command
-  for command in arch-chroot blkid bootctl findmnt flock genfstab install jq lsblk mkfs.ext4 mkfs.fat mount mountpoint od pacman pacstrap partprobe readlink sgdisk swapon systemctl systemd-detect-virt udevadm umount uname wipefs; do
+  for command in arch-chroot blkid bootctl findmnt flock genfstab getent install jq lsblk mkfs.ext4 mkfs.fat mount mountpoint od pacman pacstrap partprobe readlink sgdisk swapon systemctl systemd-detect-virt udevadm umount uname wipefs; do
     command -v "$command" >/dev/null || fail "required command is missing: $command"
   done
 }
@@ -54,8 +54,8 @@ verify_mount_source() {
 }
 
 install_system() {
-  local disk=$1 hostname=$2 username=$3 password=$4
-  local disk_json disk_kname esp root root_uuid fstab_tmp cpu_vendor microcode_package boot_file existing_mount mount_targets
+  local disk=$1 hostname=$2 username=$3 password=$4 expected_identity=$5
+  local disk_json esp root root_uuid fstab_tmp cpu_vendor microcode_package boot_file existing_mount mount_targets current_identity
   local -a target_packages=(base linux linux-firmware mkinitcpio networkmanager sudo)
   local -a boot_files
 
@@ -64,6 +64,7 @@ install_system() {
   validate_install_disk "$disk"
   validate_hostname "$hostname" || fail "invalid hostname: $hostname"
   validate_username "$username" || fail "invalid username: $username"
+  ! username_conflicts_with_system_account "$username" || fail "username is reserved by the Arch base system: $username"
   [[ -n $password ]] || fail "password must not be empty"
   [[ $password != *:* && $password != *$'\n'* ]] || fail "password contains an unsupported colon or newline"
   mountpoint -q "$TARGET" && fail "$TARGET is already mounted"
@@ -93,7 +94,8 @@ install_system() {
     fail 'target package transaction could not be resolved'
 
   validate_install_disk "$disk"
-  disk_kname=$(lsblk -dnro KNAME "$disk")
+  current_identity=$(installation_disk_identity "$disk") || fail "could not read installation disk identity"
+  [[ $current_identity == "$expected_identity" ]] || fail "installation disk identity changed before erasure"
 
   log "Erasing partition metadata and repartitioning $disk"
   wipefs --all --force "$disk"
@@ -106,8 +108,8 @@ install_system() {
   udevadm settle --timeout=10
 
   disk_json=$(lsblk --tree --json --paths --output PATH,PARTN,PKNAME,PARTTYPE "$disk")
-  esp=$(partition_path_from_json "$disk_json" 1 "$disk_kname" "$ESP_GUID")
-  root=$(partition_path_from_json "$disk_json" 2 "$disk_kname" "$ROOT_GUID")
+  esp=$(partition_path_from_json "$disk_json" 1 "$disk" "$ESP_GUID")
+  root=$(partition_path_from_json "$disk_json" 2 "$disk" "$ROOT_GUID")
   esp=$(readlink -e "$esp")
   root=$(readlink -e "$root")
   [[ -b $esp && -b $root ]] || fail "new partition devices were not created"
@@ -197,11 +199,12 @@ EOF
 }
 
 main() {
-  local disk='' confirm_disk='' hostname='' username='' password_fd='' password canonical_disk
+  local disk='' confirm_disk='' confirm_identity='' hostname='' username='' password_fd='' password canonical_disk current_identity
   while (( $# > 0 )); do
     case $1 in
       --disk) disk=${2:-}; shift 2 ;;
       --confirm-disk) confirm_disk=${2:-}; shift 2 ;;
+      --confirm-identity) confirm_identity=${2:-}; shift 2 ;;
       --hostname) hostname=${2:-}; shift 2 ;;
       --username) username=${2:-}; shift 2 ;;
       --password-fd) password_fd=${2:-}; shift 2 ;;
@@ -210,7 +213,7 @@ main() {
     esac
   done
 
-  [[ -n $disk && -n $confirm_disk && -n $hostname && -n $username && -n $password_fd ]] || {
+  [[ -n $disk && -n $confirm_disk && -n $confirm_identity && -n $hostname && -n $username && -n $password_fd ]] || {
     usage
     return 2
   }
@@ -224,9 +227,11 @@ main() {
   canonical_disk=$(readlink -e "$disk") || fail "could not canonicalize installation disk: $disk"
   [[ $confirm_disk == "$canonical_disk" ]] ||
     fail "confirmation disk does not exactly match the canonical installation disk: $canonical_disk"
+  current_identity=$(installation_disk_identity "$canonical_disk") || fail "could not read installation disk identity"
+  [[ $current_identity == "$confirm_identity" ]] || fail "confirmation identity does not match the selected installation disk"
   IFS= read -r -d '' password <&"$password_fd" || true
   INSTALL_ATTEMPTED=1
-  install_system "$canonical_disk" "$hostname" "$username" "$password"
+  install_system "$canonical_disk" "$hostname" "$username" "$password" "$confirm_identity"
   unset password
 }
 

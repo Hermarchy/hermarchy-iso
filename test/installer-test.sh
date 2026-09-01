@@ -30,6 +30,12 @@ assert_failure validate_username root
 assert_failure validate_username 'bad.name'
 pass 'username validation'
 
+install -d "$TMP/sysusers"
+printf 'u archreserved - "Reserved test user"\n' >"$TMP/sysusers/arch.conf"
+assert_success username_conflicts_with_system_account archreserved "$TMP/sysusers"
+assert_failure username_conflicts_with_system_account definitely_not_an_arch_account_987 "$TMP/sysusers"
+pass 'target system-account collision detection'
+
 cat >"$TMP/cpuinfo-intel" <<'EOF'
 processor : 0
 vendor_id : GenuineIntel
@@ -118,9 +124,9 @@ pass 'authoritative disk validation rejects removable media'
 
 esp_guid=c12a7328-f81f-11d2-ba4b-00a0c93ec93b
 root_guid=4f68bce3-e8cd-4db1-96e7-fbcaf984b709
-partitions='{"blockdevices":[{"path":"/dev/nvme0n1","partn":null,"pkname":null,"parttype":null,"children":[{"path":"/dev/nvme0n1p1","partn":1,"pkname":"nvme0n1","parttype":"c12a7328-f81f-11d2-ba4b-00a0c93ec93b"},{"path":"/dev/nvme0n1p2","partn":2,"pkname":"nvme0n1","parttype":"4f68bce3-e8cd-4db1-96e7-fbcaf984b709"}]}]}'
-assert_equal "$(partition_path_from_json "$partitions" 1 nvme0n1 "$esp_guid")" /dev/nvme0n1p1 'ESP path'
-assert_equal "$(partition_path_from_json "$partitions" 2 nvme0n1 "$root_guid")" /dev/nvme0n1p2 'root path'
+partitions='{"blockdevices":[{"path":"/dev/nvme0n1","partn":null,"pkname":null,"parttype":null,"children":[{"path":"/dev/nvme0n1p1","partn":1,"pkname":"/dev/nvme0n1","parttype":"c12a7328-f81f-11d2-ba4b-00a0c93ec93b"},{"path":"/dev/nvme0n1p2","partn":2,"pkname":"/dev/nvme0n1","parttype":"4f68bce3-e8cd-4db1-96e7-fbcaf984b709"}]}]}'
+assert_equal "$(partition_path_from_json "$partitions" 1 /dev/nvme0n1 "$esp_guid")" /dev/nvme0n1p1 'ESP path'
+assert_equal "$(partition_path_from_json "$partitions" 2 /dev/nvme0n1 "$root_guid")" /dev/nvme0n1p2 'root path'
 assert_failure partition_path_from_json "$partitions" 1 wrong-parent "$esp_guid"
 pass 'partition discovery does not concatenate disk names'
 
@@ -130,8 +136,16 @@ for record in \
   'mmcblk0:mmcblk0p1'; do
   parent=${record%%:*}
   child=${record#*:}
-  fixture=$(printf '{"blockdevices":[{"path":"/dev/%s","partn":null,"pkname":null,"parttype":null,"children":[{"path":"/dev/%s","partn":1,"pkname":"%s","parttype":"%s"}]}]}' \
+  fixture=$(printf '{"blockdevices":[{"path":"/dev/%s","partn":null,"pkname":null,"parttype":null,"children":[{"path":"/dev/%s","partn":1,"pkname":"/dev/%s","parttype":"%s"}]}]}' \
     "$parent" "$child" "$parent" "$esp_guid")
-  assert_equal "$(partition_path_from_json "$fixture" 1 "$parent" "$esp_guid")" "/dev/$child" "$parent partition path"
+  assert_equal "$(partition_path_from_json "$fixture" 1 "/dev/$parent" "$esp_guid")" "/dev/$child" "$parent partition path"
 done
 pass 'SATA, virtio, and MMC partition paths resolve from metadata'
+
+identity_json='{"blockdevices":[{"path":"/dev/vda","type":"disk","size":42949672960,"model":"QEMU Disk","serial":"disk-1","wwn":null,"maj:min":"252:0"}]}'
+assert_equal \
+  "$(disk_identity_from_json "$identity_json")" \
+  '["/dev/vda","252:0",42949672960,"QEMU Disk","disk-1",""]' \
+  'disk identity token'
+assert_failure disk_identity_from_json '{"blockdevices":[]}'
+pass 'disk identity snapshot uses path, device number, size, model, serial, and WWN'

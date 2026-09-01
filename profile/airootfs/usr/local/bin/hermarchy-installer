@@ -20,7 +20,7 @@ input_value() {
 
 password_value() {
   local prompt=$1 value
-  value=$("${DIALOG[@]}" --stdout --insecure --title "Hermarchy Installer" --passwordbox "$prompt" 10 72) || return 1
+  value=$("${DIALOG[@]}" --stdout --title "Hermarchy Installer" --passwordbox "$prompt" 10 72) || return 1
   printf '%s' "$value"
 }
 
@@ -42,7 +42,7 @@ choose_disk() {
 }
 
 main() {
-  local disk hostname username password confirm_password confirmation status uefi_error
+  local disk disk_identity hostname username password confirm_password confirmation status uefi_error
 
   [[ $EUID == 0 ]] || fail "installer must run as root"
   [[ $(tty) == /dev/tty1 ]] || fail "installer must run on tty1"
@@ -61,6 +61,10 @@ main() {
 
   disk=$(choose_disk) || return 1
   validate_install_disk "$disk"
+  disk_identity=$(installation_disk_identity "$disk") || {
+    message "The selected disk identity could not be read safely."
+    return 1
+  }
 
   while :; do
     hostname=$(input_value "Hostname:" "archlinux") || return 1
@@ -70,8 +74,10 @@ main() {
 
   while :; do
     username=$(input_value "Username:" "user") || return 1
-    validate_username "$username" && break
-    message "Username must start with a lowercase letter or underscore, contain only lowercase letters, digits, underscores, or hyphens, and cannot be root or nobody."
+    if validate_username "$username" && ! username_conflicts_with_system_account "$username"; then
+      break
+    fi
+    message "Username must start with a lowercase letter or underscore, contain only lowercase letters, digits, underscores, or hyphens, and must not be reserved by the Arch base system."
   done
 
   while :; do
@@ -106,6 +112,7 @@ main() {
   /usr/local/bin/hermarchy-install \
     --disk "$disk" \
     --confirm-disk "$disk" \
+    --confirm-identity "$disk_identity" \
     --hostname "$hostname" \
     --username "$username" \
     --password-fd 3

@@ -28,6 +28,19 @@ validate_username() {
   esac
 }
 
+username_conflicts_with_system_account() {
+  local value=$1 sysusers_dir=${2:-/usr/lib/sysusers.d} file type name
+
+  getent passwd "$value" >/dev/null 2>&1 && return 0
+  for file in "$sysusers_dir"/*.conf; do
+    [[ -f $file ]] || continue
+    while read -r type name _; do
+      [[ $type != \#* && $type == u* && $name == "$value" ]] && return 0
+    done <"$file"
+  done
+  return 1
+}
+
 cpu_vendor_from_cpuinfo() {
   local cpuinfo=${1:-/proc/cpuinfo} key value
   [[ -r $cpuinfo ]] || return 0
@@ -100,7 +113,7 @@ validate_uefi_environment() {
 find_live_disk() {
   local source type parent
   source=$(findmnt -n -o SOURCE /run/archiso/bootmnt 2>/dev/null || true)
-  [[ $source == /dev/* ]] || return 0
+  [[ $source == /dev/* ]] || return 1
 
   source=$(readlink -f "$source")
   while [[ $source == /dev/* ]]; do
@@ -206,4 +219,22 @@ partition_path_from_json() {
     | $matches[0]
     | select(type == "string" and length > 0)
   ' <<<"$json"
+}
+
+disk_identity_from_json() {
+  local json=$1
+  jq -cer '
+    .blockdevices
+    | select(length == 1)
+    | .[0]
+    | select(.type == "disk")
+    | [.path, .["maj:min"], .size, (.model // ""), (.serial // ""), (.wwn // "")]
+  ' <<<"$json"
+}
+
+installation_disk_identity() {
+  local disk=$1 json
+  json=$(lsblk --nodeps --json --bytes --paths \
+    --output PATH,TYPE,SIZE,MODEL,SERIAL,WWN,MAJ:MIN "$disk") || return 1
+  disk_identity_from_json "$json"
 }

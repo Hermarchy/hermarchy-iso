@@ -28,7 +28,9 @@ required_engine = (
     'INSTALL_ATTEMPTED=1',
     'TARGET_MOUNTED=1',
     '--confirm-disk',
+    '--confirm-identity',
     'confirmation disk does not exactly match',
+    'installation disk identity changed before erasure',
     'validate_uefi_environment',
     'validate_install_disk "$disk"',
     'arch-chroot -S "$TARGET" bootctl',
@@ -54,6 +56,10 @@ if 'if (( TARGET_MOUNTED )); then' not in cleanup or 'mountpoint -q "$TARGET"' i
     raise SystemExit('cleanup must unmount only a target mount created by this installer process')
 if '--confirm-disk "$disk"' not in ui:
     raise SystemExit('installer UI must bind the engine confirmation to the exact selected disk')
+if '--confirm-identity "$disk_identity"' not in ui:
+    raise SystemExit('installer UI must bind the engine to the selected physical disk identity')
+if '--insecure' in ui:
+    raise SystemExit('password dialog must not disclose password length')
 if engine.count('validate_install_disk "$disk"') < 2:
     raise SystemExit('installation disk must be revalidated after package preflight and immediately before erasure')
 first_validation=engine.index('validate_install_disk "$disk"')

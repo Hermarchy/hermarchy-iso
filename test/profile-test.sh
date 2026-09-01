@@ -18,6 +18,7 @@ MANIFEST="$ROOT/test/fixtures/archiso-releng-f900196.json"
 python3 - "$PROFILE" "$MANIFEST" <<'PY'
 import hashlib
 import json
+import os
 from pathlib import Path
 import stat
 import sys
@@ -33,6 +34,20 @@ if (
     raise SystemExit('profile fixture does not identify the pinned releng baseline')
 expected=baseline['entries']
 
+def describe(path):
+    metadata=path.lstat()
+    # Git records only the executable bit for regular files, while checkout
+    # umasks vary. Compare canonical Git modes; profiledef content below guards
+    # ArchISO's final arbitrary ownership/mode declarations byte-for-byte.
+    if stat.S_ISLNK(metadata.st_mode):
+        return {'type':'symlink', 'mode':'0777', 'target':os.readlink(path)}
+    if stat.S_ISDIR(metadata.st_mode):
+        return {'type':'directory', 'mode':'0755'}
+    if stat.S_ISREG(metadata.st_mode):
+        mode='0755' if metadata.st_mode & stat.S_IXUSR else '0644'
+        return {'type':'file', 'mode':mode, 'sha256':hashlib.sha256(path.read_bytes()).hexdigest()}
+    return {'type':'special', 'mode':f'{stat.S_IMODE(metadata.st_mode):04o}'}
+
 record=(profile/'ARCHISO_UPSTREAM').read_text()
 if f'Commit: {commit}' not in record or 'Profile: configs/releng' not in record:
     raise SystemExit('profile upstream record does not match the pinned releng baseline')
@@ -40,10 +55,11 @@ if f'Commit: {commit}' not in record or 'Profile: configs/releng' not in record:
 current={
     path.relative_to(profile).as_posix(): path
     for path in profile.rglob('*')
-    if path.is_file() or path.is_symlink()
 }
 installer_additions={
     'ARCHISO_UPSTREAM',
+    'airootfs/usr/local/lib',
+    'airootfs/usr/local/lib/hermarchy-installer',
     'airootfs/usr/local/bin/hermarchy-install',
     'airootfs/usr/local/bin/hermarchy-installer',
     'airootfs/usr/local/lib/hermarchy-installer/common.sh',
@@ -54,16 +70,17 @@ if extra != installer_additions:
     raise SystemExit(f'unexpected non-upstream profile files: {sorted(extra ^ installer_additions)}')
 if missing:
     raise SystemExit(f'upstream releng files were removed: {sorted(missing)}')
-addition_modes={
-    'ARCHISO_UPSTREAM':'0644',
-    'airootfs/usr/local/bin/hermarchy-install':'0755',
-    'airootfs/usr/local/bin/hermarchy-installer':'0755',
-    'airootfs/usr/local/lib/hermarchy-installer/common.sh':'0644',
+addition_metadata={
+    'ARCHISO_UPSTREAM':{'type':'file', 'mode':'0644'},
+    'airootfs/usr/local/lib':{'type':'directory', 'mode':'0755'},
+    'airootfs/usr/local/lib/hermarchy-installer':{'type':'directory', 'mode':'0755'},
+    'airootfs/usr/local/bin/hermarchy-install':{'type':'file', 'mode':'0755'},
+    'airootfs/usr/local/bin/hermarchy-installer':{'type':'file', 'mode':'0755'},
+    'airootfs/usr/local/lib/hermarchy-installer/common.sh':{'type':'file', 'mode':'0644'},
 }
-for relative, expected_mode in addition_modes.items():
-    path=current[relative]
-    actual_mode='0755' if path.stat().st_mode & stat.S_IXUSR else '0644'
-    if path.is_symlink() or actual_mode != expected_mode:
+for relative, expected_metadata in addition_metadata.items():
+    actual=describe(current[relative])
+    if {key:actual[key] for key in ('type','mode')} != expected_metadata:
         raise SystemExit(f'unexpected installer addition type or mode: {relative}')
 
 allowed_changes={
@@ -74,18 +91,12 @@ allowed_changes={
 for relative, digest in expected.items():
     if relative in allowed_changes:
         continue
-    path=current[relative]
-    if path.is_symlink():
-        actual={'type':'symlink', 'mode':'0777', 'target':path.readlink().as_posix()}
-    else:
-        mode='0755' if path.stat().st_mode & stat.S_IXUSR else '0644'
-        actual={'type':'file', 'mode':mode, 'sha256':hashlib.sha256(path.read_bytes()).hexdigest()}
+    actual=describe(current[relative])
     if actual != digest:
         raise SystemExit(f'non-installer ArchISO profile drift: {relative}')
 for relative in allowed_changes:
-    path=current[relative]
-    mode='0755' if path.stat().st_mode & stat.S_IXUSR else '0644'
-    if path.is_symlink() or expected[relative]['type'] != 'file' or mode != expected[relative]['mode']:
+    actual=describe(current[relative])
+    if actual['type'] != 'file' or expected[relative]['type'] != 'file' or actual['mode'] != expected[relative]['mode']:
         raise SystemExit(f'installer integration changed the upstream file type or mode: {relative}')
 
 # The live package list may only add direct dependencies of the Hermarchy
